@@ -77,7 +77,7 @@ def _client_card(client, prefix: str = "") -> str:
     return (
         f"{header}"
         f"<b>{client.name}</b>\n"
-        f"Номер для связи — {client.phone or '—'}\n\n"
+        f"Номер для связи — {client.phone or 'не указан'}\n\n"
         f"<b>Требования:</b>\n"
         f"{reqs}\n"
         f"{districts_str}"
