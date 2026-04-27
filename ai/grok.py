@@ -10,6 +10,9 @@ from database.models import Client
 _http_client = httpx.AsyncClient(verify=False)
 client = AsyncOpenAI(api_key=GROK_API_KEY, base_url=GROK_BASE_URL, http_client=_http_client)
 
+# Global semaphore — max 2 concurrent Groq requests across all users
+_groq_sem = asyncio.Semaphore(2)
+
 SYSTEM_PROMPT = """Ты — профессиональный аналитик рынка аренды квартир Казани. Извлекаешь структурированные данные из объявлений в Telegram-чатах риелторов.
 
 Ты работаешь ТОЛЬКО с квартирами и комнатами. Дома, коттеджи, таунхаусы, дачи — игнорируй (is_listing: false).
@@ -127,21 +130,22 @@ EXTRACTION_PROMPT = """Проанализируй сообщение из Telegr
 
 
 async def _groq_request(messages: list, max_tokens: int, temperature: float = 0.1) -> str | None:
-    """Make a Groq API request with retry on 429."""
-    for attempt in range(3):
-        try:
-            response = await client.chat.completions.create(
-                model=GROK_MODEL,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            if "429" in str(e) and attempt < 2:
-                await asyncio.sleep(2 ** attempt * 3)  # 3s, 6s
-                continue
-            return None
+    """Make a Groq API request with semaphore and retry on 429."""
+    async with _groq_sem:
+        for attempt in range(3):
+            try:
+                response = await client.chat.completions.create(
+                    model=GROK_MODEL,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                if "429" in str(e) and attempt < 2:
+                    await asyncio.sleep(2 ** attempt * 3)  # 3s, 6s
+                    continue
+                return None
     return None
 
 
