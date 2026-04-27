@@ -16,13 +16,17 @@ def is_owner(telegram_id: int) -> bool:
 
 
 def _welcome_text(user) -> str:
-    status = "Мониторинг активен" if user.is_working else "Мониторинг выключен"
-    auth = "Аккаунт подключён" if user.is_authorized else "Аккаунт не подключён (используй /auth)"
-    return f"<b>ChatScanner</b>\n\nСтатус: {status}\nАккаунт: {auth}"
+    monitoring = "✅" if user.is_working else "❌"
+    auth = "✅" if user.is_authorized else "❌"
+    return (
+        f"Привет, {user.first_name or 'риелтор'}!\n\n"
+        f"Статус мониторинга: {monitoring}\n"
+        f"Статус аккаунта: {auth}"
+    )
 
 
 async def _edit_main(message: Message, text: str, reply_markup=None):
-    """Edit the stored main message, or send a new one if it's gone."""
+    """Edit the stored main message, or replace it with a new one if editing fails."""
     tid = message.from_user.id
     msg_id = _main_msgs.get(tid)
     if msg_id:
@@ -36,9 +40,26 @@ async def _edit_main(message: Message, text: str, reply_markup=None):
             )
             return
         except Exception:
-            pass
+            # Edit failed — delete the stale message before sending fresh one
+            try:
+                await message.bot.delete_message(tid, msg_id)
+            except Exception:
+                pass
     msg = await message.answer(text, parse_mode="HTML", reply_markup=reply_markup)
     _main_msgs[tid] = msg.message_id
+
+
+async def _replace_main(message: Message, text: str, reply_markup=None):
+    """Delete old main message and send a new one (needed when reply keyboard must change)."""
+    tid = message.from_user.id
+    old_id = _main_msgs.pop(tid, None)
+    msg = await message.bot.send_message(tid, text, parse_mode="HTML", reply_markup=reply_markup)
+    _main_msgs[tid] = msg.message_id
+    if old_id:
+        try:
+            await message.bot.delete_message(tid, old_id)
+        except Exception:
+            pass
 
 
 async def _delete_user_msg(message: Message):
@@ -65,7 +86,7 @@ async def cmd_start(message: Message):
     # /start itself is a user message — delete it to keep chat clean
     await _delete_user_msg(message)
 
-    text = f"Привет, {user.first_name or 'риелтор'}!\n\n" + _welcome_text(user)
+    text = _welcome_text(user)
     tid = message.from_user.id
     msg_id = _main_msgs.get(tid)
     if msg_id:
@@ -78,11 +99,17 @@ async def cmd_start(message: Message):
             return
         except Exception:
             pass
+    old_id = _main_msgs.pop(tid, None)
     msg = await message.bot.send_message(
         tid, text, parse_mode="HTML",
         reply_markup=bottom_menu(user.is_working),
     )
     _main_msgs[tid] = msg.message_id
+    if old_id:
+        try:
+            await message.bot.delete_message(tid, old_id)
+        except Exception:
+            pass
 
 
 # ── Inline "main_menu" callback (Назад from sub-menus) ───────────────
@@ -129,14 +156,20 @@ async def btn_toggle_work(message: Message):
         await scanner.stop_listening(message.from_user.id)
         status_text = "<b>Мониторинг остановлен.</b>"
 
-    # Send new message to update the reply keyboard button text (Начать ↔ Стоп)
-    msg = await message.bot.send_message(
-        message.from_user.id,
-        status_text,
-        parse_mode="HTML",
-        reply_markup=bottom_menu(new_state),
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    # Send a throwaway message just to update the reply keyboard text (Начать ↔ Стоп)
+    kb_updater = await message.bot.send_message(
+        message.from_user.id, "...", reply_markup=bottom_menu(new_state)
     )
-    _main_msgs[message.from_user.id] = msg.message_id
+    try:
+        await message.bot.delete_message(message.from_user.id, kb_updater.message_id)
+    except Exception:
+        pass
+
+    back_kb = InlineKeyboardBuilder()
+    back_kb.button(text="Вернуться назад", callback_data="main_menu")
+    await _replace_main(message, status_text, back_kb.as_markup())
 
 
 @router.message(F.text == "Мои клиенты")
@@ -171,7 +204,7 @@ async def btn_home(message: Message):
     user = await get_user(message.from_user.id)
     if not user:
         return
-    await _edit_main(message, _welcome_text(user), main_menu(user.is_working))
+    await _edit_main(message, _welcome_text(user), None)
 
 
 @router.message(F.text == "Выйти")

@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database.db import get_clients, get_client, create_client, update_client, delete_client, get_user, get_client_matches
 from bot.keyboards.menus import (
-    clients_menu, client_actions, transaction_type_kb, property_type_kb,
+    clients_menu, client_actions, property_type_kb,
     districts_kb, skip_kb, back_kb, confirm_kb,
 )
 from config import PROPERTY_TYPES, TRANSACTION_TYPES, KAZAN_DISTRICTS
@@ -19,14 +19,12 @@ class ClientEdit(StatesGroup):
     choosing_field = State()
     editing_value = State()
     editing_districts = State()
-    editing_transaction = State()
     editing_property = State()
 
 
 class ClientAdd(StatesGroup):
     name = State()
     phone = State()
-    transaction_type = State()
     property_type = State()
     rooms_min = State()
     rooms_max = State()
@@ -85,7 +83,7 @@ async def cb_client_view(call: CallbackQuery, state: FSMContext):
         return
     status = "✅ Активен" if client.is_active else "❌ Отключён"
     text = (
-        f"👤 <b>{client.name}</b>\n"
+        f"<b>{client.name}</b>\n"
         f"Статус: {status}\n"
         f"📞 {client.phone or '—'}\n\n"
         f"<b>Требования:</b>\n{client.requirements_text()}"
@@ -106,7 +104,7 @@ async def cb_client_matches(call: CallbackQuery):
 
     if not matches:
         await call.message.edit_text(
-            f"👤 <b>{client.name}</b>\n\n"
+            f"<b>{client.name}</b>\n\n"
             "📭 Подходящих объектов пока нет.\n\n"
             "Объекты накапливаются автоматически во время мониторинга.",
             parse_mode="HTML",
@@ -226,7 +224,6 @@ async def cb_client_delete_yes(call: CallbackQuery):
 EDIT_FIELDS = {
     "name": "Имя",
     "phone": "Телефон",
-    "transaction_type": "Тип сделки",
     "property_type": "Тип объекта",
     "min_rooms": "Мин. комнат",
     "max_rooms": "Макс. комнат",
@@ -237,6 +234,22 @@ EDIT_FIELDS = {
     "districts": "Районы",
     "notes": "Заметки",
 }
+
+
+def _edit_fields_kb(client_id: int):
+    kb = InlineKeyboardBuilder()
+    for field, label in EDIT_FIELDS.items():
+        kb.button(text=label, callback_data=f"edit_field:{field}")
+    kb.button(text="Назад", callback_data=f"client_view:{client_id}")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def _with_back(markup, callback: str = "edit_back_fields"):
+    """Append a Назад row to any InlineKeyboardMarkup."""
+    kb = InlineKeyboardBuilder.from_markup(markup)
+    kb.row(InlineKeyboardButton(text="Назад", callback_data=callback))
+    return kb.as_markup()
 
 
 @router.callback_query(F.data.startswith("client_edit:"))
@@ -252,17 +265,25 @@ async def cb_client_edit(call: CallbackQuery, state: FSMContext):
         menu_msg_id=call.message.message_id,
     )
     await state.set_state(ClientEdit.choosing_field)
-
-    kb = InlineKeyboardBuilder()
-    for field, label in EDIT_FIELDS.items():
-        kb.button(text=label, callback_data=f"edit_field:{field}")
-    kb.button(text="◀️ Назад", callback_data=f"client_view:{client_id}")
-    kb.adjust(2)
     await call.message.edit_text(
-        f"✏️ <b>Редактирование: {client.name}</b>\n\nЧто изменить?",
+        f"<b>Редактирование: {client.name}</b>\n\nЧто изменить?",
         parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        reply_markup=_edit_fields_kb(client_id),
     )
+
+
+@router.callback_query(F.data == "edit_back_fields")
+async def cb_edit_back_fields(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    client_id = data.get("edit_client_id")
+    client = await get_client(client_id)
+    await state.set_state(ClientEdit.choosing_field)
+    await call.message.edit_text(
+        f"<b>Редактирование: {client.name}</b>\n\nЧто изменить?",
+        parse_mode="HTML",
+        reply_markup=_edit_fields_kb(client_id),
+    )
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("edit_field:"), ClientEdit.choosing_field)
@@ -278,21 +299,21 @@ async def cb_edit_field(call: CallbackQuery, state: FSMContext):
         await state.update_data(selected_districts=current)
         await state.set_state(ClientEdit.editing_districts)
         await call.message.edit_text(
-            "🗺 <b>Районы</b> (выбери нужные, нажми Готово):",
+            "Районы (выбери нужные, нажми Готово):",
             parse_mode="HTML",
-            reply_markup=districts_kb(current),
+            reply_markup=_with_back(districts_kb(current)),
         )
-    elif field == "transaction_type":
-        await state.set_state(ClientEdit.editing_transaction)
-        await call.message.edit_text("🔄 Тип сделки:", reply_markup=transaction_type_kb())
     elif field == "property_type":
         await state.set_state(ClientEdit.editing_property)
-        await call.message.edit_text("🏠 Тип объекта:", reply_markup=property_type_kb())
+        await call.message.edit_text("Тип объекта:", reply_markup=_with_back(property_type_kb()))
     else:
         await state.set_state(ClientEdit.editing_value)
+        back_kb = InlineKeyboardBuilder()
+        back_kb.button(text="Назад", callback_data="edit_back_fields")
         await call.message.edit_text(
-            f"✏️ Введи новое значение для <b>{label}</b>:\n\n(или <code>-</code> чтобы очистить)",
+            f"Введи новое значение для <b>{label}</b>:\n\n(или <code>-</code> чтобы очистить)",
             parse_mode="HTML",
+            reply_markup=back_kb.as_markup(),
         )
 
 
@@ -305,14 +326,14 @@ async def cb_edit_district(call: CallbackQuery, state: FSMContext):
     if val == "all":
         selected = []
         await state.update_data(selected_districts=selected)
-        await call.message.edit_reply_markup(reply_markup=districts_kb(selected))
+        await call.message.edit_reply_markup(reply_markup=_with_back(districts_kb(selected)))
     elif val == "done":
         client_id = data["edit_client_id"]
         await update_client(client_id, districts=selected if selected else None)
         client = await get_client(client_id)
         await state.clear()
         await call.message.edit_text(
-            f"✅ Районы обновлены!\n\n👤 <b>{client.name}</b>\n{client.requirements_text()}",
+            f"✅ Районы обновлены!\n\n<b>{client.name}</b>\n{client.requirements_text()}",
             parse_mode="HTML",
             reply_markup=client_actions(client_id),
         )
@@ -322,22 +343,8 @@ async def cb_edit_district(call: CallbackQuery, state: FSMContext):
         else:
             selected.append(val)
         await state.update_data(selected_districts=selected)
-        await call.message.edit_reply_markup(reply_markup=districts_kb(selected))
+        await call.message.edit_reply_markup(reply_markup=_with_back(districts_kb(selected)))
 
-
-@router.callback_query(F.data.startswith("tr_type:"), ClientEdit.editing_transaction)
-async def cb_edit_transaction(call: CallbackQuery, state: FSMContext):
-    val = call.data.split(":")[1]
-    data = await state.get_data()
-    client_id = data["edit_client_id"]
-    await update_client(client_id, transaction_type=None if val == "any" else val)
-    client = await get_client(client_id)
-    await state.clear()
-    await call.message.edit_text(
-        f"✅ Обновлено!\n\n👤 <b>{client.name}</b>\n{client.requirements_text()}",
-        parse_mode="HTML",
-        reply_markup=client_actions(client_id),
-    )
 
 
 @router.callback_query(F.data.startswith("prop_type:"), ClientEdit.editing_property)
@@ -349,7 +356,7 @@ async def cb_edit_property(call: CallbackQuery, state: FSMContext):
     client = await get_client(client_id)
     await state.clear()
     await call.message.edit_text(
-        f"✅ Обновлено!\n\n👤 <b>{client.name}</b>\n{client.requirements_text()}",
+        f"✅ Обновлено!\n\n<b>{client.name}</b>\n{client.requirements_text()}",
         parse_mode="HTML",
         reply_markup=client_actions(client_id),
     )
@@ -389,7 +396,7 @@ async def process_edit_value(message: Message, state: FSMContext):
     client = await get_client(client_id)
     await _del(message)
     await state.clear()
-    text = f"✅ Обновлено!\n\n👤 <b>{client.name}</b>\n{client.requirements_text()}"
+    text = f"✅ Обновлено!\n\n<b>{client.name}</b>\n{client.requirements_text()}"
     await message.bot.edit_message_text(
         chat_id=chat_id,
         message_id=msg_id,
@@ -426,24 +433,16 @@ async def process_name(message: Message, state: FSMContext):
 @router.callback_query(F.data == "skip_phone", ClientAdd.phone)
 async def skip_phone(call: CallbackQuery, state: FSMContext):
     await state.update_data(phone=None)
-    await state.set_state(ClientAdd.transaction_type)
-    await call.message.edit_text("🔄 Тип сделки:", reply_markup=transaction_type_kb())
+    await state.set_state(ClientAdd.property_type)
+    await call.message.edit_text("Тип объекта:", reply_markup=property_type_kb())
 
 
 @router.message(ClientAdd.phone)
 async def process_phone(message: Message, state: FSMContext):
     await state.update_data(phone=message.text.strip())
     await _del(message)
-    await state.set_state(ClientAdd.transaction_type)
-    await _next(message.bot, state, "🔄 Тип сделки:", transaction_type_kb())
-
-
-@router.callback_query(F.data.startswith("tr_type:"), ClientAdd.transaction_type)
-async def process_transaction_type(call: CallbackQuery, state: FSMContext):
-    val = call.data.split(":")[1]
-    await state.update_data(transaction_type=None if val == "any" else val)
     await state.set_state(ClientAdd.property_type)
-    await call.message.edit_text("🏠 Тип объекта:", reply_markup=property_type_kb())
+    await _next(message.bot, state, "Тип объекта:", property_type_kb())
 
 
 @router.callback_query(F.data.startswith("prop_type:"), ClientAdd.property_type)
@@ -659,7 +658,7 @@ async def _save_client(telegram_id: int, bot: Bot, state: FSMContext):
     clients = await get_clients(user.id, active_only=False)
     text = (
         f"✅ <b>Клиент добавлен!</b>\n\n"
-        f"👤 {client.name}\n{client.requirements_text()}"
+        f"{client.name}\n{client.requirements_text()}"
     )
     await bot.edit_message_text(
         chat_id=chat_id,

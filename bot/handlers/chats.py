@@ -100,8 +100,8 @@ async def cb_chats_add_list(call: CallbackQuery, state: FSMContext):
     )
     await call.message.edit_text(
         f"📋 <b>Твои группы и каналы</b> ({len(dialogs)})\n\n"
-        f"✅ — уже в мониторинге · Нажми для переключения\n"
-        f"<i>Напиши часть названия для поиска</i>",
+        f"✅ — уже в мониторинге, нажми для переключения\n"
+        f"\nНапиши часть названия для поиска",
         parse_mode="HTML",
         reply_markup=paginated_chats_kb(dialogs, 0, selected_ids),
     )
@@ -123,16 +123,16 @@ async def cb_chats_search_query(message: Message, state: FSMContext):
         display = filtered
         header = (
             f"🔍 <b>Поиск: «{query}»</b> — {len(filtered)} из {len(dialogs)}\n\n"
-            f"✅ — уже в мониторинге · Нажми для переключения\n"
-            f"<i>Напиши другой запрос или нажми кнопку для очистки</i>"
+            f"✅ — уже в мониторинге, нажми для переключения\n"
+            f"\nНапиши другой запрос или нажми кнопку для очистки"
         )
     else:
         await state.update_data(filtered_dialogs=None, search_query="", page=0)
         display = dialogs
         header = (
             f"📋 <b>Все группы</b> ({len(dialogs)})\n\n"
-            f"✅ — уже в мониторинге · Нажми для переключения\n"
-            f"<i>Напиши часть названия для поиска</i>"
+            f"✅ — уже в мониторинге, нажми для переключения\n"
+            f"\nНапиши часть названия для поиска"
         )
 
     await message.bot.edit_message_text(

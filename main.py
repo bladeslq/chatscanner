@@ -40,12 +40,6 @@ async def restore_userbot_sessions(bot: Bot):
             if chat_ids:
                 await scanner.start_listening(OWNER_ID, chat_ids)
                 logger.info(f"Resumed monitoring {len(chat_ids)} chats")
-                await bot.send_message(
-                    OWNER_ID,
-                    f"✅ <b>Мониторинг восстановлен</b>\n"
-                    f"Слежу за {len(chat_ids)} чатами.",
-                    parse_mode="HTML",
-                )
     except Exception as e:
         logger.error(f"Failed to restore userbot session: {e}")
 

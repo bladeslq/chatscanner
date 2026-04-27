@@ -347,9 +347,6 @@ KAZAN_DISTRICTS = [
 PROPERTY_TYPES = {
     "apartment": "Квартира",
     "house": "Дом/Коттедж",
-    "commercial": "Коммерческая",
-    "land": "Земельный участок",
-    "room": "Комната",
 }
 
 TRANSACTION_TYPES = {
