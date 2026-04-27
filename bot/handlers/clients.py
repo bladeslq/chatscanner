@@ -73,6 +73,7 @@ def _client_card(client, prefix: str = "") -> str:
     reqs = "\n".join(client.requirements_text().split(" | "))
     districts_str = ", ".join(client.districts) if client.districts else "Любой"
     header = f"{prefix}\n\n" if prefix else ""
+    notes_str = f"\n{client.notes}" if client.notes else ""
     return (
         f"{header}"
         f"<b>{client.name}</b>\n"
@@ -80,6 +81,7 @@ def _client_card(client, prefix: str = "") -> str:
         f"<b>Требования:</b>\n"
         f"{reqs}\n"
         f"Район: {districts_str}"
+        f"{notes_str}"
     )
 
 
