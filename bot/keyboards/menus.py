@@ -11,7 +11,6 @@ def bottom_menu(is_working: bool) -> ReplyKeyboardMarkup:
         KeyboardButton(text="Мои клиенты"),
         KeyboardButton(text="Выбор чатов"),
     )
-    kb.row(KeyboardButton(text="Выйти"))
     return kb.as_markup(resize_keyboard=True, persistent=True)
 
 

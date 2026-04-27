@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
-from database.db import get_or_create_user, get_user, get_clients, get_monitored_chats, set_work_mode, update_user
+from database.db import get_or_create_user, get_user, get_clients, get_monitored_chats, set_work_mode
 from bot.keyboards.menus import main_menu, bottom_menu, clients_menu, chats_menu
 
 router = Router()
@@ -23,7 +23,7 @@ def _welcome_text(user) -> str:
     monitoring = "✅" if user.is_working else "❌"
     auth = "✅" if user.is_authorized else "❌"
     return (
-        f"<b>Привет, {user.first_name or 'риелтор'}!</b>\n\n"
+        f"<b>Привет, {user.first_name or 'риелтор'}!</b>\n"
         f"Статус мониторинга: {monitoring}\n"
         f"Статус аккаунта: {auth}"
     )
@@ -162,31 +162,3 @@ async def btn_chats(message: Message):
     await _edit_main(message, "<b>Мониторинг чатов</b>", chats_menu(monitored))
 
 
-@router.message(F.text == "Выйти")
-async def btn_logout(message: Message):
-    await _delete_user_msg(message)
-
-    user = await get_user(message.from_user.id)
-    if not user or not user.is_authorized:
-        await _edit_main(message, "Аккаунт не подключён.")
-        return
-
-    from userbot.scanner import scanner
-
-    await set_work_mode(message.from_user.id, False)
-    await scanner.stop_listening(message.from_user.id)
-
-    try:
-        client = scanner._clients.get(message.from_user.id)
-        if client and client.is_connected():
-            await client.log_out()
-    except Exception:
-        pass
-
-    await update_user(message.from_user.id, is_authorized=False, session_string=None, is_working=False)
-
-    await _edit_main(
-        message,
-        "Выход выполнен. Аккаунт отключён.\n\nДля подключения нового аккаунта используй /auth",
-        None,
-    )
