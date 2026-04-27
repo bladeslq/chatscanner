@@ -101,8 +101,8 @@ async def cb_client_matches(call: CallbackQuery):
     if not matches:
         await call.message.edit_text(
             f"<b>{client.name}</b>\n\n"
-            "📭 Подходящих объектов пока нет.\n\n"
-            "Объекты накапливаются автоматически во время мониторинга.",
+            "📭 Подходящих объектов пока нет\n\n"
+            "Объекты накапливаются автоматически во время мониторинга",
             parse_mode="HTML",
             reply_markup=back_kb(f"client_view:{client_id}"),
         )
