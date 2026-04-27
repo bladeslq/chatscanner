@@ -213,7 +213,8 @@ async def _finish_auth(telegram_id: int, tg_client, bot: Bot):
             is_authorized=True,
             phone=str(me.phone) if me.phone else None,
         )
-        await bot.send_message(
+        from bot.handlers.start import set_main_msg
+        msg = await bot.send_message(
             telegram_id,
             f"Аккаунт подключён!\n\n"
             f"{me.first_name} (@{me.username})\n\n"
@@ -221,6 +222,7 @@ async def _finish_auth(telegram_id: int, tg_client, bot: Bot):
             parse_mode="HTML",
             reply_markup=bottom_menu(False),
         )
+        set_main_msg(telegram_id, msg.message_id)
         logger.info(f"User {telegram_id} authorized as @{me.username}")
     except Exception as e:
         logger.exception("finish_auth failed")

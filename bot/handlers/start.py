@@ -10,6 +10,10 @@ router = Router()
 _main_msgs: dict[int, int] = {}
 
 
+def set_main_msg(telegram_id: int, msg_id: int):
+    _main_msgs[telegram_id] = msg_id
+
+
 def is_owner(telegram_id: int) -> bool:
     """Kept for import compatibility with auth.py."""
     return True
@@ -90,7 +94,7 @@ async def cmd_start(message: Message):
         )
         return
 
-    await _replace_main(message, _welcome_text(user), bottom_menu(user.is_working))
+    await _edit_main(message, _welcome_text(user))
 
 
 # ── Inline "main_menu" callback (Назад from sub-menus) ───────────────
@@ -156,15 +160,6 @@ async def btn_chats(message: Message):
         return
     monitored = await get_monitored_chats(user.id)
     await _edit_main(message, "<b>Мониторинг чатов</b>", chats_menu(monitored))
-
-
-@router.message(F.text == "Главная")
-async def btn_home(message: Message):
-    await _delete_user_msg(message)
-    user = await get_user(message.from_user.id)
-    if not user:
-        return
-    await _replace_main(message, _welcome_text(user), bottom_menu(user.is_working))
 
 
 @router.message(F.text == "Выйти")
