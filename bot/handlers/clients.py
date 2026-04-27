@@ -80,7 +80,7 @@ def _client_card(client, prefix: str = "") -> str:
         f"Номер для связи — {client.phone or '—'}\n\n"
         f"<b>Требования:</b>\n"
         f"{reqs}\n"
-        f"Район: {districts_str}"
+        f"{districts_str}"
         f"{notes_str}"
     )
 
