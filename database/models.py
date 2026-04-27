@@ -76,10 +76,6 @@ class Client(Base):
                 parts.append(f"от {self.min_area} м²")
             else:
                 parts.append(f"до {self.max_area} м²")
-        if self.districts:
-            parts.append(f"Районы: {', '.join(self.districts)}")
-        if self.notes:
-            parts.append(f"Заметки: {self.notes}")
         return " | ".join(parts) if parts else "Без ограничений"
 
     @staticmethod

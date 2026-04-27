@@ -69,6 +69,20 @@ async def cb_clients_menu(call: CallbackQuery, state: FSMContext):
 
 # ── View ──────────────────────────────────────────────────────────────
 
+def _client_card(client, prefix: str = "") -> str:
+    reqs = "\n".join(client.requirements_text().split(" | "))
+    districts_str = ", ".join(client.districts) if client.districts else "Любой"
+    header = f"{prefix}\n\n" if prefix else ""
+    return (
+        f"{header}"
+        f"<b>{client.name}</b>\n"
+        f"Номер для связи — {client.phone or '—'}\n\n"
+        f"<b>Требования:</b>\n"
+        f"{reqs}\n"
+        f"Район: {districts_str}"
+    )
+
+
 @router.callback_query(F.data.startswith("client_view:"))
 async def cb_client_view(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -77,14 +91,7 @@ async def cb_client_view(call: CallbackQuery, state: FSMContext):
     if not client:
         await call.answer("Клиент не найден")
         return
-    reqs = "\n".join(client.requirements_text().split(" | "))
-    text = (
-        f"<b>{client.name}</b>\n"
-        f"Номер для связи — {client.phone or '—'}\n\n"
-        f"<b>Требования:</b>\n"
-        f"{reqs}"
-    )
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=client_actions(client_id))
+    await call.message.edit_text(_client_card(client), parse_mode="HTML", reply_markup=client_actions(client_id))
 
 
 # ── Matches ───────────────────────────────────────────────────────────
@@ -325,7 +332,7 @@ async def cb_edit_district(call: CallbackQuery, state: FSMContext):
         client = await get_client(client_id)
         await state.clear()
         await call.message.edit_text(
-            f"✅ Районы обновлены!\n\n<b>{client.name}</b>\n{client.requirements_text()}",
+            _client_card(client, "✅ Районы обновлены!"),
             parse_mode="HTML",
             reply_markup=client_actions(client_id),
         )
@@ -348,7 +355,7 @@ async def cb_edit_property(call: CallbackQuery, state: FSMContext):
     client = await get_client(client_id)
     await state.clear()
     await call.message.edit_text(
-        f"✅ Обновлено!\n\n<b>{client.name}</b>\n{client.requirements_text()}",
+        _client_card(client, "✅ Обновлено!"),
         parse_mode="HTML",
         reply_markup=client_actions(client_id),
     )
@@ -388,7 +395,7 @@ async def process_edit_value(message: Message, state: FSMContext):
     client = await get_client(client_id)
     await _del(message)
     await state.clear()
-    text = f"✅ Обновлено!\n\n<b>{client.name}</b>\n{client.requirements_text()}"
+    text = _client_card(client, "✅ Обновлено!")
     await message.bot.edit_message_text(
         chat_id=chat_id,
         message_id=msg_id,
@@ -585,10 +592,7 @@ async def _save_client(telegram_id: int, bot: Bot, state: FSMContext):
         notes=data.get("notes"),
     )
     clients = await get_clients(user.id)
-    text = (
-        f"✅ <b>Клиент добавлен!</b>\n\n"
-        f"{client.name}\n{client.requirements_text()}"
-    )
+    text = _client_card(client, "✅ <b>Клиент добавлен!</b>")
     await bot.edit_message_text(
         chat_id=chat_id,
         message_id=msg_id,
