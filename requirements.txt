@@ -1,0 +1,9 @@
+aiogram==3.13.1
+telethon==1.36.0
+aiosqlite==0.20.0
+sqlalchemy==2.0.36
+openai==1.57.0
+python-dotenv==1.0.1
+aiohttp==3.10.11
+qrcode[pil]==8.2
+pillow==12.2.0
