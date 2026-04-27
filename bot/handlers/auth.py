@@ -55,6 +55,10 @@ async def cb_start_auth(call, state: FSMContext):
 
 @router.message(Command("auth"))
 async def cmd_auth(message: Message, state: FSMContext):
+    try:
+        await message.delete()
+    except Exception:
+        pass
     user = await get_user(message.from_user.id)
     if user and user.is_authorized and user.session_string:
         await message.answer("✅ Аккаунт уже подключён.\n\nЧтобы переподключить — /reauth")
@@ -64,11 +68,21 @@ async def cmd_auth(message: Message, state: FSMContext):
 
 @router.message(Command("reauth"))
 async def cmd_reauth(message: Message, state: FSMContext):
+    try:
+        await message.delete()
+    except Exception:
+        pass
     await update_user(message.from_user.id, is_authorized=False, session_string=None)
     await _start_phone_auth(message, state)
 
 
 async def _start_phone_auth(message: Message, state: FSMContext):
+    old_data = await state.get_data()
+    for msg_id in old_data.get("auth_msgs", []):
+        try:
+            await message.bot.delete_message(message.chat.id, msg_id)
+        except Exception:
+            pass
     await state.clear()
     await state.set_state(AuthStates.waiting_phone)
     msg = await message.answer(
