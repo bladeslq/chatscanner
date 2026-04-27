@@ -149,7 +149,7 @@ async def btn_clients(message: Message):
     client_list = await get_clients(user.id)
     text = (
         "<b>Здесь список ваших клиентов</b>\n\n"
-        "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их.\n\n"
+        "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их\n\n"
         f"<b>Активных: {len(client_list)}</b>"
     )
     await _edit_main(message, text, clients_menu(client_list))
