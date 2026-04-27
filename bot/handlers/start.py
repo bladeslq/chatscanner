@@ -29,26 +29,16 @@ def _welcome_text(user) -> str:
     )
 
 
-async def _replace_main(message: Message, text: str, inline_markup=None):
-    """Delete old main message, send new one with bottom keyboard, then add inline markup."""
+async def _replace_main(message: Message, text: str, reply_markup=None):
+    """Delete old main message and send a new one (reply keyboard or no markup)."""
     tid = message.chat.id
     user = await get_user(tid)
     is_working = user.is_working if user else False
-
     old_id = _main_msgs.pop(tid, None)
     msg = await message.bot.send_message(
-        tid, text, parse_mode="HTML", reply_markup=bottom_menu(is_working)
+        tid, text, parse_mode="HTML", reply_markup=reply_markup or bottom_menu(is_working)
     )
     _main_msgs[tid] = msg.message_id
-
-    if inline_markup is not None:
-        try:
-            await message.bot.edit_message_reply_markup(
-                chat_id=tid, message_id=msg.message_id, reply_markup=inline_markup
-            )
-        except Exception:
-            pass
-
     if old_id:
         try:
             await message.bot.delete_message(tid, old_id)
@@ -56,9 +46,26 @@ async def _replace_main(message: Message, text: str, inline_markup=None):
             pass
 
 
-# _edit_main delegates to _replace_main so keyboard is always re-sent
 async def _edit_main(message: Message, text: str, inline_markup=None):
-    await _replace_main(message, text, inline_markup)
+    """Edit the stored main message with inline keyboard, or send new one."""
+    tid = message.chat.id
+    msg_id = _main_msgs.get(tid)
+    if msg_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=tid, message_id=msg_id,
+                text=text, parse_mode="HTML",
+                reply_markup=inline_markup,
+            )
+            return
+        except Exception:
+            try:
+                await message.bot.delete_message(tid, msg_id)
+            except Exception:
+                pass
+            _main_msgs.pop(tid, None)
+    msg = await message.answer(text, parse_mode="HTML", reply_markup=inline_markup)
+    _main_msgs[tid] = msg.message_id
 
 
 async def _delete_user_msg(message: Message):
