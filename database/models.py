@@ -53,8 +53,6 @@ class Client(Base):
         parts = []
         if self.transaction_type:
             parts.append(TRANSACTION_TYPES.get(self.transaction_type, self.transaction_type))
-        if self.property_type:
-            parts.append(PROPERTY_TYPES.get(self.property_type, self.property_type))
         if self.min_rooms or self.max_rooms:
             if self.min_rooms == self.max_rooms:
                 parts.append(f"{self.min_rooms}-комн.")

@@ -79,9 +79,9 @@ async def cb_client_view(call: CallbackQuery, state: FSMContext):
         return
     reqs = "\n".join(client.requirements_text().split(" | "))
     text = (
-        f"<b>{client.name}</b>\n\n"
+        f"<b>{client.name}</b>\n"
         f"Номер для связи — {client.phone or '—'}\n\n"
-        f"Требования:\n\n"
+        f"<b>Требования:</b>\n\n"
         f"{reqs}"
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=client_actions(client_id))
@@ -584,7 +584,7 @@ async def _save_client(telegram_id: int, bot: Bot, state: FSMContext):
         districts=data.get("selected_districts") or data.get("districts"),
         notes=data.get("notes"),
     )
-    clients = await get_clients(user.id, active_only=False)
+    clients = await get_clients(user.id)
     text = (
         f"✅ <b>Клиент добавлен!</b>\n\n"
         f"{client.name}\n{client.requirements_text()}"
