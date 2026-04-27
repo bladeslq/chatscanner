@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery
 from database.db import (
     get_user, set_work_mode, get_clients, get_monitored_chats, save_match,
 )
-from bot.keyboards.menus import main_menu, bottom_menu
+from bot.keyboards.menus import main_menu
 from userbot.scanner import scanner
 from ai.grok import extract_listing, check_match
 from ai.dadata import enrich_district
@@ -51,7 +51,6 @@ async def cb_toggle_work(call: CallbackQuery):
         parse_mode="HTML",
         reply_markup=main_menu(new_state),
     )
-    await call.message.answer(" ", reply_markup=bottom_menu(new_state))
 
 
 async def _start_monitoring(telegram_id: int):

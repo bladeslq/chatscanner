@@ -15,7 +15,7 @@ def is_owner(telegram_id: int) -> bool:
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     if not is_owner(message.from_user.id):
-        await message.answer("⛔ Нет доступа.")
+        await message.answer("Нет доступа.")
         return
 
     user = await get_or_create_user(
@@ -24,19 +24,17 @@ async def cmd_start(message: Message):
         first_name=message.from_user.first_name,
     )
 
-    status = "🟢 Мониторинг активен" if user.is_working else "⭕ Мониторинг выключен"
-    auth_status = "✅ Аккаунт подключён" if user.is_authorized else "⚠️ Аккаунт не подключён (используй /auth)"
+    status = "Мониторинг активен" if user.is_working else "Мониторинг выключен"
+    auth_status = "Аккаунт подключён" if user.is_authorized else "Аккаунт не подключён (используй /auth)"
 
     await message.answer(
-        f"👋 Привет, {message.from_user.first_name}!\n\n"
-        f"📊 <b>ChatScanner</b> — мониторинг чатов риелторов\n\n"
+        f"Привет, {message.from_user.first_name}!\n\n"
+        f"<b>ChatScanner</b> — мониторинг чатов риелторов\n\n"
         f"Статус: {status}\n"
-        f"Аккаунт: {auth_status}\n\n"
-        f"Выбери действие:",
+        f"Аккаунт: {auth_status}",
         parse_mode="HTML",
         reply_markup=bottom_menu(user.is_working),
     )
-    await message.answer("Меню:", reply_markup=main_menu(user.is_working))
 
 
 @router.callback_query(F.data == "main_menu")
@@ -44,10 +42,10 @@ async def cb_main_menu(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     if not user:
         return
-    status = "🟢 Мониторинг активен" if user.is_working else "⭕ Мониторинг выключен"
-    auth_status = "✅ Аккаунт подключён" if user.is_authorized else "⚠️ Аккаунт не подключён (/auth)"
+    status = "Мониторинг активен" if user.is_working else "Мониторинг выключен"
+    auth_status = "Аккаунт подключён" if user.is_authorized else "Аккаунт не подключён (/auth)"
     await call.message.edit_text(
-        f"📊 <b>ChatScanner</b>\n\n"
+        f"<b>ChatScanner</b>\n\n"
         f"Статус: {status}\n"
         f"Аккаунт: {auth_status}\n\n"
         f"Выбери действие:",
@@ -58,7 +56,7 @@ async def cb_main_menu(call: CallbackQuery):
 
 # ── Bottom reply-keyboard handlers ───────────────────────────────────
 
-@router.message(F.text.in_({"🟢 Начать мониторинг", "🔴 Стоп мониторинг"}))
+@router.message(F.text.in_({"Начать мониторинг", "Стоп мониторинг"}))
 async def btn_toggle_work(message: Message):
     if not is_owner(message.from_user.id):
         return
@@ -69,7 +67,7 @@ async def btn_toggle_work(message: Message):
     if not user:
         return
     if not user.is_authorized:
-        await message.answer("⚠️ Сначала подключи аккаунт: /auth")
+        await message.answer("Сначала подключи аккаунт: /auth")
         return
 
     new_state = not user.is_working
@@ -77,16 +75,15 @@ async def btn_toggle_work(message: Message):
 
     if new_state:
         await _start_monitoring(message.from_user.id)
-        status_text = "🟢 <b>Мониторинг запущен!</b>"
+        status_text = "<b>Мониторинг запущен!</b>"
     else:
         await scanner.stop_listening(message.from_user.id)
-        status_text = "🔴 <b>Мониторинг остановлен.</b>"
+        status_text = "<b>Мониторинг остановлен.</b>"
 
     await message.answer(status_text, parse_mode="HTML", reply_markup=bottom_menu(new_state))
-    await message.answer("Меню:", reply_markup=main_menu(new_state))
 
 
-@router.message(F.text == "👥 Мои клиенты")
+@router.message(F.text == "Мои клиенты")
 async def btn_clients(message: Message):
     if not is_owner(message.from_user.id):
         return
@@ -94,10 +91,10 @@ async def btn_clients(message: Message):
     if not user:
         return
     client_list = await get_clients(user.id)
-    await message.answer("👥 <b>Мои клиенты</b>", parse_mode="HTML", reply_markup=clients_menu(client_list))
+    await message.answer("<b>Мои клиенты</b>", parse_mode="HTML", reply_markup=clients_menu(client_list))
 
 
-@router.message(F.text == "📡 Выбор чатов")
+@router.message(F.text == "Выбор чатов")
 async def btn_chats(message: Message):
     if not is_owner(message.from_user.id):
         return
@@ -105,4 +102,4 @@ async def btn_chats(message: Message):
     if not user:
         return
     monitored = await get_monitored_chats(user.id)
-    await message.answer("📡 <b>Мониторинг чатов</b>", parse_mode="HTML", reply_markup=chats_menu(monitored))
+    await message.answer("<b>Мониторинг чатов</b>", parse_mode="HTML", reply_markup=chats_menu(monitored))
