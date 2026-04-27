@@ -54,17 +54,28 @@ async def _del(message: Message):
 
 # ── List ──────────────────────────────────────────────────────────────
 
+def _clients_text(clients: list) -> str:
+    return (
+        "<b>Здесь список ваших клиентов</b>\n\n"
+        "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их\n\n"
+        f"<b>Активных: {len(clients)}</b>"
+    )
+
+
 @router.callback_query(F.data == "clients_menu")
 async def cb_clients_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
     user = await get_user(call.from_user.id)
     clients = await get_clients(user.id, active_only=True)
-    text = (
-        "<b>Здесь список ваших клиентов</b>\n\n"
-        "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их\n\n"
-        f"<b>Активных: {len(clients)}</b>"
-    )
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=clients_menu(clients))
+    await call.message.edit_text(_clients_text(clients), parse_mode="HTML", reply_markup=clients_menu(clients))
+
+
+@router.callback_query(F.data.startswith("clients_page:"))
+async def cb_clients_page(call: CallbackQuery):
+    page = int(call.data.split(":")[1])
+    user = await get_user(call.from_user.id)
+    clients = await get_clients(user.id, active_only=True)
+    await call.message.edit_reply_markup(reply_markup=clients_menu(clients, page))
 
 
 # ── View ──────────────────────────────────────────────────────────────

@@ -31,18 +31,28 @@ def _display_dialogs(data: dict) -> list:
 
 # ── Monitored chats list ───────────────────────────────────────────────
 
+def _chats_text(monitored: list) -> str:
+    return (
+        "<b>Здесь список ваших чатов для мониторинга</b>\n\n"
+        "Выберите новые чаты или нажмите на текущие, чтобы убрать их из списка\n\n"
+        f"<b>Активных: {len(monitored)}</b>"
+    )
+
+
 @router.callback_query(F.data == "chats_menu")
 async def cb_chats_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
     user = await get_user(call.from_user.id)
     monitored = await get_monitored_chats(user.id)
-    count = len(monitored)
-    text = (
-        "<b>Здесь список ваших чатов для мониторинга</b>\n\n"
-        "Выберите новые чаты или нажмите на текущие, чтобы убрать их из списка\n\n"
-        f"<b>Активных: {count}</b>"
-    )
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=chats_menu(monitored))
+    await call.message.edit_text(_chats_text(monitored), parse_mode="HTML", reply_markup=chats_menu(monitored))
+
+
+@router.callback_query(F.data.startswith("monitored_page:"))
+async def cb_monitored_page(call: CallbackQuery):
+    page = int(call.data.split(":")[1])
+    user = await get_user(call.from_user.id)
+    monitored = await get_monitored_chats(user.id)
+    await call.message.edit_reply_markup(reply_markup=chats_menu(monitored, page))
 
 
 @router.callback_query(F.data.startswith("chat_remove:"))
@@ -54,12 +64,7 @@ async def cb_chat_remove(call: CallbackQuery):
     if user.is_working:
         await _start_monitoring(call.from_user.id)
     monitored = await get_monitored_chats(user.id)
-    text = (
-        "<b>Здесь список ваших чатов для мониторинга</b>\n\n"
-        "Выберите новые чаты или нажмите на текущие, чтобы убрать их из списка\n\n"
-        f"<b>Активных: {len(monitored)}</b>"
-    )
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=chats_menu(monitored))
+    await call.message.edit_text(_chats_text(monitored), parse_mode="HTML", reply_markup=chats_menu(monitored))
 
 
 # ── Add chats with search ──────────────────────────────────────────────

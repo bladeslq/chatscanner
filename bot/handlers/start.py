@@ -3,6 +3,8 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
 from database.db import get_or_create_user, get_user, get_clients, get_monitored_chats, set_work_mode
 from bot.keyboards.menus import main_menu, bottom_menu, clients_menu, chats_menu
+from bot.handlers.clients import _clients_text
+from bot.handlers.chats import _chats_text
 
 router = Router()
 
@@ -147,12 +149,7 @@ async def btn_clients(message: Message):
     if not user:
         return
     client_list = await get_clients(user.id)
-    text = (
-        "<b>Здесь список ваших клиентов</b>\n\n"
-        "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их\n\n"
-        f"<b>Активных: {len(client_list)}</b>"
-    )
-    await _edit_main(message, text, clients_menu(client_list))
+    await _edit_main(message, _clients_text(client_list), clients_menu(client_list))
 
 
 @router.message(F.text == "Выбор чатов")
@@ -162,12 +159,6 @@ async def btn_chats(message: Message):
     if not user:
         return
     monitored = await get_monitored_chats(user.id)
-    count = len(monitored)
-    text = (
-        "<b>Здесь список ваших чатов для мониторинга</b>\n\n"
-        "Выберите новые чаты или нажмите на текущие, чтобы убрать их из списка\n\n"
-        f"<b>Активных: {count}</b>"
-    )
-    await _edit_main(message, text, chats_menu(monitored))
+    await _edit_main(message, _chats_text(monitored), chats_menu(monitored))
 
 

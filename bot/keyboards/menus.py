@@ -24,13 +24,31 @@ def main_menu(is_working: bool) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def clients_menu(clients: list) -> InlineKeyboardMarkup:
+def clients_menu(clients: list, page: int = 0) -> InlineKeyboardMarkup:
+    PAGE_SIZE = 8
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_clients = clients[start:end]
+
     kb = InlineKeyboardBuilder()
-    for c in clients:
+    for c in page_clients:
         kb.button(text=c.name, callback_data=f"client_view:{c.id}")
-    kb.button(text="Новый клиент", callback_data="client_add")
-    kb.button(text="Назад", callback_data="main_menu")
-    kb.adjust(*([1] * len(clients)), 2)
+    kb.adjust(1)
+
+    total_pages = max(1, (len(clients) - 1) // PAGE_SIZE + 1)
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="<", callback_data=f"clients_page:{page-1}"))
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+        if end < len(clients):
+            nav.append(InlineKeyboardButton(text=">", callback_data=f"clients_page:{page+1}"))
+        kb.row(*nav)
+
+    kb.row(
+        InlineKeyboardButton(text="Новый клиент", callback_data="client_add"),
+        InlineKeyboardButton(text="Назад", callback_data="main_menu"),
+    )
     return kb.as_markup()
 
 
@@ -80,13 +98,31 @@ def skip_kb(callback: str) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def chats_menu(monitored_chats: list) -> InlineKeyboardMarkup:
+def chats_menu(monitored_chats: list, page: int = 0) -> InlineKeyboardMarkup:
+    PAGE_SIZE = 8
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_chats = monitored_chats[start:end]
+
     kb = InlineKeyboardBuilder()
-    for c in monitored_chats:
+    for c in page_chats:
         kb.button(text=f"{c.chat_name} [удалить]", callback_data=f"chat_remove:{c.chat_id}")
-    kb.button(text="Новый чат", callback_data="chats_add_list")
-    kb.button(text="Назад", callback_data="main_menu")
-    kb.adjust(*([1] * len(monitored_chats)), 2)
+    kb.adjust(1)
+
+    total_pages = max(1, (len(monitored_chats) - 1) // PAGE_SIZE + 1)
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="<", callback_data=f"monitored_page:{page-1}"))
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+        if end < len(monitored_chats):
+            nav.append(InlineKeyboardButton(text=">", callback_data=f"monitored_page:{page+1}"))
+        kb.row(*nav)
+
+    kb.row(
+        InlineKeyboardButton(text="Новый чат", callback_data="chats_add_list"),
+        InlineKeyboardButton(text="Назад", callback_data="main_menu"),
+    )
     return kb.as_markup()
 
 
