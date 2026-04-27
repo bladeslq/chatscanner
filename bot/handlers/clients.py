@@ -175,10 +175,10 @@ def _match_nav_kb(client_id: int, match_id: int, page: int, total: int):
     kb = InlineKeyboardBuilder()
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"client_matches:{client_id}:{page - 1}"))
+        nav.append(InlineKeyboardButton(text="<", callback_data=f"client_matches:{client_id}:{page - 1}"))
     nav.append(InlineKeyboardButton(text=f"{page + 1}/{total}", callback_data="noop"))
     if page < total - 1:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"client_matches:{client_id}:{page + 1}"))
+        nav.append(InlineKeyboardButton(text=">", callback_data=f"client_matches:{client_id}:{page + 1}"))
     if nav:
         kb.row(*nav)
     kb.row(
