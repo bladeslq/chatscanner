@@ -1,6 +1,17 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from config import PROPERTY_TYPES, TRANSACTION_TYPES
+
+
+def bottom_menu(is_working: bool) -> ReplyKeyboardMarkup:
+    work_text = "🔴 Стоп мониторинг" if is_working else "🟢 Начать мониторинг"
+    kb = ReplyKeyboardBuilder()
+    kb.row(KeyboardButton(text=work_text))
+    kb.row(
+        KeyboardButton(text="👥 Мои клиенты"),
+        KeyboardButton(text="📡 Выбор чатов"),
+    )
+    return kb.as_markup(resize_keyboard=True, persistent=True)
 
 
 def main_menu(is_working: bool) -> InlineKeyboardMarkup:
