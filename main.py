@@ -2,6 +2,7 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand, MenuButtonCommands
 
 from config import BOT_TOKEN
 from database.db import init_db, get_all_authorized_users, get_monitored_chats
@@ -61,6 +62,14 @@ async def main():
     dp.include_router(clients.router)
     dp.include_router(chats.router)
     dp.include_router(work_mode.router)
+
+    # Set bot commands menu
+    await bot.set_my_commands([
+        BotCommand(command="start",  description="Главная"),
+        BotCommand(command="auth",   description="Подключить аккаунт"),
+        BotCommand(command="reauth", description="Переподключить аккаунт"),
+    ])
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
     # Init DB
     await init_db()
