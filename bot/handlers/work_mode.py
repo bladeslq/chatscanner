@@ -1,5 +1,7 @@
 """Work mode toggle and the core scanning/matching logic."""
 import logging
+import asyncio
+import time
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
 
@@ -10,7 +12,7 @@ from database.db import (
 from bot.keyboards.menus import main_menu
 from userbot.scanner import scanner
 from ai.grok import extract_listing, check_match, check_tenant_conflict
-from ai.dadata import enrich_district
+from ai.dadata import enrich_district  # used inside _get_listing
 from config import PROPERTY_TYPES, TRANSACTION_TYPES
 
 router = Router()
@@ -18,6 +20,47 @@ logger = logging.getLogger(__name__)
 
 # Global bot reference set from main.py
 _bot: Bot = None
+
+# Cache: (chat_id, message_id) → {listing, ts}
+# Prevents parsing the same message multiple times when several users monitor the same chat
+_listing_cache: dict[tuple, dict] = {}
+_listing_locks: dict[tuple, asyncio.Lock] = {}
+_CACHE_TTL = 300  # 5 minutes
+
+
+async def _get_listing(chat_id: int, message_id: int, text: str) -> dict:
+    key = (chat_id, message_id)
+
+    # Fast path — already cached
+    cached = _listing_cache.get(key)
+    if cached and time.monotonic() - cached["ts"] < _CACHE_TTL:
+        return cached["listing"]
+
+    # Get or create a lock for this specific message
+    if key not in _listing_locks:
+        _listing_locks[key] = asyncio.Lock()
+    lock = _listing_locks[key]
+
+    async with lock:
+        # Double-check after acquiring lock (another coroutine may have just filled it)
+        cached = _listing_cache.get(key)
+        if cached and time.monotonic() - cached["ts"] < _CACHE_TTL:
+            return cached["listing"]
+
+        listing = await extract_listing(text)
+        if listing.get("is_listing"):
+            listing = await enrich_district(listing)
+
+        _listing_cache[key] = {"listing": listing, "ts": time.monotonic()}
+
+        # Cleanup stale entries to avoid memory leak
+        now = time.monotonic()
+        stale = [k for k, v in _listing_cache.items() if now - v["ts"] > _CACHE_TTL]
+        for k in stale:
+            _listing_cache.pop(k, None)
+            _listing_locks.pop(k, None)
+
+    return listing
 
 
 def set_bot(bot: Bot):
@@ -94,13 +137,12 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
 
     logger.info(f"📨 Сообщение из [{chat_name}]: {text[:100]}")
 
-    # Extract listing data with Grok
-    listing = await extract_listing(text)
+    # Parse once per (chat_id, message_id) — cached for all users monitoring the same chat
+    listing = await _get_listing(chat_id, message.id, text)
     logger.info(f"🤖 Groq ответ: is_listing={listing.get('is_listing')} type={listing.get('property_type')} price={listing.get('price')}")
     if not listing.get("is_listing"):
         return
 
-    listing = await enrich_district(listing)
     logger.info(f"📍 Район итого: {listing.get('district')} (ЖК: {listing.get('complex')})")
 
     logger.info(f"✅ Объект найден в [{chat_name}]: {listing.get('property_type')} {listing.get('price')}")
