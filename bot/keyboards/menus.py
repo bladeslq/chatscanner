@@ -30,7 +30,7 @@ def clients_menu(clients: list) -> InlineKeyboardMarkup:
         kb.button(text=c.name, callback_data=f"client_view:{c.id}")
     kb.button(text="Новый клиент", callback_data="client_add")
     kb.button(text="Назад", callback_data="main_menu")
-    kb.adjust(1)
+    kb.adjust(*([1] * len(clients)), 2)
     return kb.as_markup()
 
 
@@ -86,7 +86,7 @@ def chats_menu(monitored_chats: list) -> InlineKeyboardMarkup:
         kb.button(text=f"{c.chat_name} [удалить]", callback_data=f"chat_remove:{c.chat_id}")
     kb.button(text="Новый чат", callback_data="chats_add_list")
     kb.button(text="Назад", callback_data="main_menu")
-    kb.adjust(1)
+    kb.adjust(*([1] * len(monitored_chats)), 2)
     return kb.as_markup()
 
 
