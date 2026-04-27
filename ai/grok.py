@@ -148,6 +148,32 @@ async def extract_listing(message_text: str) -> dict:
         return {"is_listing": False}
 
 
+async def check_tenant_conflict(tenant_requirements: str, client_notes: str) -> bool:
+    """
+    Second LLM call: checks if listing tenant requirements conflict with client notes.
+    Only called when both fields are non-empty. Returns True if conflict found.
+    """
+    try:
+        response = await client.chat.completions.create(
+            model=GROK_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": (
+                    f"Требования объявления к жильцам: {tenant_requirements}\n"
+                    f"Заметки о клиенте: {client_notes}\n\n"
+                    "Есть ли конфликт между требованиями объявления и профилем клиента? "
+                    "Ответь только одним словом: да или нет"
+                )},
+            ],
+            temperature=0.0,
+            max_tokens=5,
+        )
+        answer = response.choices[0].message.content.strip().lower()
+        return answer.startswith("да")
+    except Exception:
+        return False  # при ошибке не блокируем
+
+
 def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
     """
     Check if a listing matches a client's requirements.
@@ -155,6 +181,8 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
 
     Euro format rule: Евро2к matches clients looking for 1к or 2к, etc.
     euro_rooms_range=[N-1, N] means the listing suits N-1 and N room seekers.
+
+    Tenant conflict (БЖ/БД/nationality) is checked separately via check_tenant_conflict().
     """
     if not listing.get("is_listing"):
         return False, 0

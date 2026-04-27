@@ -9,7 +9,7 @@ from database.db import (
 )
 from bot.keyboards.menus import main_menu
 from userbot.scanner import scanner
-from ai.grok import extract_listing, check_match
+from ai.grok import extract_listing, check_match, check_tenant_conflict
 from ai.dadata import enrich_district
 from config import PROPERTY_TYPES, TRANSACTION_TYPES
 
@@ -111,6 +111,13 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
         matches, score = check_match(listing, client)
         if not matches:
             continue
+
+        # second LLM call: tenant conflict check (only when both sides have data)
+        if listing.get("tenant_requirements") and client.notes:
+            conflict = await check_tenant_conflict(listing["tenant_requirements"], client.notes)
+            if conflict:
+                logger.info(f"🚫 Конфликт требований для клиента {client.name}, пропускаем")
+                continue
 
         if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
             logger.info(f"⏭ Дубликат, пропускаем для клиента {client.name}")
