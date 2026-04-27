@@ -71,12 +71,13 @@ async def cmd_reauth(message: Message, state: FSMContext):
 async def _start_phone_auth(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(AuthStates.waiting_phone)
-    await message.answer(
+    msg = await message.answer(
         "📱 <b>Подключение аккаунта</b>\n\n"
         "Нажми кнопку ниже или введи номер вручную в формате <code>+79991234567</code>.",
         parse_mode="HTML",
         reply_markup=_phone_keyboard(),
     )
+    await state.update_data(auth_msgs=[msg.message_id])
 
 
 @router.message(AuthStates.waiting_phone, F.contact)
@@ -87,6 +88,10 @@ async def got_contact(message: Message, state: FSMContext):
     phone = message.contact.phone_number
     if not phone.startswith("+"):
         phone = "+" + phone
+    try:
+        await message.delete()
+    except Exception:
+        pass
     await _request_code(message, state, phone)
 
 
@@ -96,6 +101,10 @@ async def got_phone_text(message: Message, state: FSMContext):
     if len(digits) < 10:
         await message.answer("❌ Не похоже на номер. Введи в формате +79991234567.")
         return
+    try:
+        await message.delete()
+    except Exception:
+        pass
     await _request_code(message, state, "+" + digits)
 
 
@@ -126,13 +135,16 @@ async def _request_code(message: Message, state: FSMContext, phone: str):
         await state.clear()
         return
 
-    await state.update_data(phone=phone, phone_code_hash=sent.phone_code_hash)
-    await state.set_state(AuthStates.waiting_code)
-    await message.answer(
+    data = await state.get_data()
+    auth_msgs = data.get("auth_msgs", [])
+    code_msg = await message.answer(
         "📨 Код отправлен. Введи его через пробел:\n\n"
         "<code>1 2 3 4 5</code>",
         parse_mode="HTML",
     )
+    auth_msgs.append(code_msg.message_id)
+    await state.update_data(phone=phone, phone_code_hash=sent.phone_code_hash, auth_msgs=auth_msgs)
+    await state.set_state(AuthStates.waiting_code)
 
 
 @router.message(AuthStates.waiting_code)
@@ -154,8 +166,16 @@ async def got_code(message: Message, state: FSMContext, bot: Bot):
     try:
         await tg_client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
     except SessionPasswordNeededError:
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        data = await state.get_data()
+        auth_msgs = data.get("auth_msgs", [])
+        twofa_msg = await message.answer("🔐 Введи облачный пароль Telegram (2FA):")
+        auth_msgs.append(twofa_msg.message_id)
+        await state.update_data(auth_msgs=auth_msgs)
         await state.set_state(AuthStates.waiting_2fa)
-        await message.answer("🔐 Введи облачный пароль Telegram (2FA):")
         return
     except PhoneCodeInvalidError:
         await message.answer("❌ Неверный код. Попробуй ещё раз:")
@@ -170,8 +190,13 @@ async def got_code(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
 
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    auth_msgs = (await state.get_data()).get("auth_msgs", [])
     await state.clear()
-    await _finish_auth(message.from_user.id, tg_client, bot)
+    await _finish_auth(message.from_user.id, tg_client, bot, auth_msgs)
 
 
 @router.message(AuthStates.waiting_2fa)
@@ -198,12 +223,17 @@ async def got_2fa(message: Message, state: FSMContext, bot: Bot):
         await message.delete()
     except Exception:
         pass
-
+    auth_msgs = (await state.get_data()).get("auth_msgs", [])
     await state.clear()
-    await _finish_auth(message.from_user.id, tg_client, bot)
+    await _finish_auth(message.from_user.id, tg_client, bot, auth_msgs)
 
 
-async def _finish_auth(telegram_id: int, tg_client, bot: Bot):
+async def _finish_auth(telegram_id: int, tg_client, bot: Bot, auth_msgs: list = None):
+    for msg_id in (auth_msgs or []):
+        try:
+            await bot.delete_message(telegram_id, msg_id)
+        except Exception:
+            pass
     try:
         session_string = tg_client.session.save()
         me = await tg_client.get_me()
