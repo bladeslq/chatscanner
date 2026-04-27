@@ -94,7 +94,7 @@ async def cmd_start(message: Message):
         )
         return
 
-    await _edit_main(message, _welcome_text(user))
+    await _replace_main(message, _welcome_text(user), bottom_menu(user.is_working))
 
 
 # ── Inline "main_menu" callback (Назад from sub-menus) ───────────────
