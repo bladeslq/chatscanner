@@ -29,40 +29,36 @@ def _welcome_text(user) -> str:
     )
 
 
-async def _edit_main(message: Message, text: str, reply_markup=None):
-    """Edit the stored main message, or replace it with a new one if editing fails."""
-    tid = message.from_user.id
-    msg_id = _main_msgs.get(tid)
-    if msg_id:
-        try:
-            await message.bot.edit_message_text(
-                chat_id=tid,
-                message_id=msg_id,
-                text=text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
-            return
-        except Exception:
-            try:
-                await message.bot.delete_message(tid, msg_id)
-            except Exception:
-                pass
-    msg = await message.answer(text, parse_mode="HTML", reply_markup=reply_markup)
-    _main_msgs[tid] = msg.message_id
+async def _replace_main(message: Message, text: str, inline_markup=None):
+    """Delete old main message, send new one with bottom keyboard, then add inline markup."""
+    tid = message.chat.id
+    user = await get_user(tid)
+    is_working = user.is_working if user else False
 
-
-async def _replace_main(message: Message, text: str, reply_markup=None):
-    """Delete old main message and send a new one (needed when reply keyboard must change)."""
-    tid = message.from_user.id
     old_id = _main_msgs.pop(tid, None)
-    msg = await message.bot.send_message(tid, text, parse_mode="HTML", reply_markup=reply_markup)
+    msg = await message.bot.send_message(
+        tid, text, parse_mode="HTML", reply_markup=bottom_menu(is_working)
+    )
     _main_msgs[tid] = msg.message_id
+
+    if inline_markup is not None:
+        try:
+            await message.bot.edit_message_reply_markup(
+                chat_id=tid, message_id=msg.message_id, reply_markup=inline_markup
+            )
+        except Exception:
+            pass
+
     if old_id:
         try:
             await message.bot.delete_message(tid, old_id)
         except Exception:
             pass
+
+
+# _edit_main delegates to _replace_main so keyboard is always re-sent
+async def _edit_main(message: Message, text: str, inline_markup=None):
+    await _replace_main(message, text, inline_markup)
 
 
 async def _delete_user_msg(message: Message):
@@ -94,7 +90,7 @@ async def cmd_start(message: Message):
         )
         return
 
-    await _replace_main(message, _welcome_text(user), bottom_menu(user.is_working))
+    await _replace_main(message, _welcome_text(user))
 
 
 # ── Inline "main_menu" callback (Назад from sub-menus) ───────────────
@@ -104,13 +100,8 @@ async def cb_main_menu(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     if not user:
         return
-    await call.message.edit_text(
-        _welcome_text(user),
-        parse_mode="HTML",
-        reply_markup=None,
-    )
-    _main_msgs[call.from_user.id] = call.message.message_id
     await call.answer()
+    await _replace_main(call.message, _welcome_text(user))
 
 
 # ── Bottom reply-keyboard handlers ───────────────────────────────────
@@ -139,7 +130,7 @@ async def btn_toggle_work(message: Message):
         await scanner.stop_listening(message.from_user.id)
         status_text = "<b>Мониторинг остановлен.</b>"
 
-    await _replace_main(message, status_text, bottom_menu(new_state))
+    await _replace_main(message, status_text)
 
 
 @router.message(F.text == "Мои клиенты")
