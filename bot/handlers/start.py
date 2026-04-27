@@ -80,30 +80,14 @@ async def cmd_start(message: Message):
 
     await _delete_user_msg(message)
 
-    text = _welcome_text(user)
-    tid = message.from_user.id
-    msg_id = _main_msgs.get(tid)
-    if msg_id:
-        try:
-            await message.bot.edit_message_text(
-                chat_id=tid, message_id=msg_id,
-                text=text, parse_mode="HTML",
-                reply_markup=None,
-            )
-            return
-        except Exception:
-            pass
-    old_id = _main_msgs.pop(tid, None)
-    msg = await message.bot.send_message(
-        tid, text, parse_mode="HTML",
-        reply_markup=bottom_menu(user.is_working),
-    )
-    _main_msgs[tid] = msg.message_id
-    if old_id:
-        try:
-            await message.bot.delete_message(tid, old_id)
-        except Exception:
-            pass
+    if not user.is_authorized:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        kb = InlineKeyboardBuilder()
+        kb.button(text="Авторизоваться", callback_data="start_auth")
+        await message.answer(
+            "Для работы необходимо подключить Telegram-аккаунт.",
+            reply_markup=kb.as_markup(),
+        )
 
 
 # ── Inline "main_menu" callback (Назад from sub-menus) ───────────────

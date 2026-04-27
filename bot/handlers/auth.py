@@ -46,6 +46,13 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
 
+@router.callback_query(F.data == "start_auth")
+async def cb_start_auth(call, state: FSMContext):
+    await call.message.delete()
+    await _start_phone_auth(call.message, state)
+    await call.answer()
+
+
 @router.message(Command("auth"))
 async def cmd_auth(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
