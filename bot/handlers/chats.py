@@ -38,7 +38,7 @@ async def cb_chats_menu(call: CallbackQuery, state: FSMContext):
     monitored = await get_monitored_chats(user.id)
     count = len(monitored)
     text = (
-        "<b>Здесь список ваших чатов для мониторинга.</b>\n\n"
+        "<b>Здесь список ваших чатов для мониторинга</b>\n\n"
         "Выберите новые чаты или нажмите на текущие, чтобы убрать их из списка\n\n"
         f"<b>Активных: {count}</b>"
     )
@@ -55,7 +55,7 @@ async def cb_chat_remove(call: CallbackQuery):
         await _start_monitoring(call.from_user.id)
     monitored = await get_monitored_chats(user.id)
     text = (
-        "<b>Здесь список ваших чатов для мониторинга.</b>\n\n"
+        "<b>Здесь список ваших чатов для мониторинга</b>\n\n"
         "Выберите новые чаты или нажмите на текущие, чтобы убрать их из списка\n\n"
         f"<b>Активных: {len(monitored)}</b>"
     )
@@ -206,7 +206,7 @@ async def cb_chats_save(call: CallbackQuery, state: FSMContext):
 
     await call.answer(f"✅ Сохранено: {len(monitored)} чатов")
     await call.message.edit_text(
-        "<b>Здесь список ваших чатов для мониторинга.</b>\n\n"
+        "<b>Здесь список ваших чатов для мониторинга</b>\n\n"
         "Выберите новые чаты или нажмите на текущие, чтобы убрать их из списка\n\n"
         f"<b>Активных: {len(monitored)}</b>",
         parse_mode="HTML",

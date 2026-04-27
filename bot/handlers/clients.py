@@ -60,7 +60,7 @@ async def cb_clients_menu(call: CallbackQuery, state: FSMContext):
     user = await get_user(call.from_user.id)
     clients = await get_clients(user.id, active_only=True)
     text = (
-        "<b>Здесь список ваших клиентов.</b>\n\n"
+        "<b>Здесь список ваших клиентов</b>\n\n"
         "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их.\n\n"
         f"<b>Активных: {len(clients)}</b>"
     )
@@ -209,7 +209,7 @@ async def cb_client_delete_yes(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     clients = await get_clients(user.id, active_only=True)
     await call.message.edit_text(
-        "<b>Здесь список ваших клиентов.</b>\n\n"
+        "<b>Здесь список ваших клиентов</b>\n\n"
         "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их.\n\n"
         f"<b>Активных: {len(clients)}</b>",
         parse_mode="HTML",
