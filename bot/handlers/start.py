@@ -132,19 +132,7 @@ async def btn_toggle_work(message: Message):
         await scanner.stop_listening(message.from_user.id)
         status_text = "<b>Мониторинг остановлен.</b>"
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-    kb_updater = await message.bot.send_message(
-        message.from_user.id, "...", reply_markup=bottom_menu(new_state)
-    )
-    try:
-        await message.bot.delete_message(message.from_user.id, kb_updater.message_id)
-    except Exception:
-        pass
-
-    back_kb = InlineKeyboardBuilder()
-    back_kb.button(text="Вернуться назад", callback_data="main_menu")
-    await _replace_main(message, status_text, back_kb.as_markup())
+    await _replace_main(message, status_text, bottom_menu(new_state))
 
 
 @router.message(F.text == "Мои клиенты")
