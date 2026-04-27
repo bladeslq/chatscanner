@@ -1,5 +1,6 @@
 import json
 import re
+import asyncio
 import httpx
 from openai import AsyncOpenAI
 from config import GROK_API_KEY, GROK_BASE_URL, GROK_MODEL
@@ -125,27 +126,45 @@ EXTRACTION_PROMPT = """Проанализируй сообщение из Telegr
 """
 
 
+async def _groq_request(messages: list, max_tokens: int, temperature: float = 0.1) -> str | None:
+    """Make a Groq API request with retry on 429."""
+    for attempt in range(3):
+        try:
+            response = await client.chat.completions.create(
+                model=GROK_MODEL,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            if "429" in str(e) and attempt < 2:
+                await asyncio.sleep(2 ** attempt * 3)  # 3s, 6s
+                continue
+            return None
+    return None
+
+
 async def extract_listing(message_text: str) -> dict:
     """Extract real estate listing data from a Telegram message."""
     if len(message_text.strip()) < 20:
         return {"is_listing": False}
-    try:
-        response = await client.chat.completions.create(
-            model=GROK_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": EXTRACTION_PROMPT + message_text},
-            ],
-            temperature=0.1,
-            max_tokens=900,
-        )
-        content = response.choices[0].message.content.strip()
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
+    content = await _groq_request(
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": EXTRACTION_PROMPT + message_text},
+        ],
+        max_tokens=900,
+    )
+    if not content:
+        return {"is_listing": False}
+    match = re.search(r"\{.*\}", content, re.DOTALL)
+    if match:
+        try:
             return json.loads(match.group())
-        return {"is_listing": False}
-    except Exception:
-        return {"is_listing": False}
+        except Exception:
+            pass
+    return {"is_listing": False}
 
 
 async def check_tenant_conflict(tenant_requirements: str, client_notes: str) -> bool:
@@ -153,27 +172,24 @@ async def check_tenant_conflict(tenant_requirements: str, client_notes: str) -> 
     Second LLM call: checks if listing tenant requirements conflict with client notes.
     Only called when both fields are non-empty. Returns True if conflict found.
     """
-    try:
-        response = await client.chat.completions.create(
-            model=GROK_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": (
-                    f"Требования объявления к жильцам: {tenant_requirements}\n"
-                    f"Заметки о клиенте: {client_notes}\n\n"
-                    "Запрещает ли объявление проживание этому клиенту? "
-                    "Конфликт — это когда объявление ЗАПРЕЩАЕТ или ИСКЛЮЧАЕТ клиента (например БЖ при наличии животных, БД при наличии детей, 'только наши' для иностранца). "
-                    "Если объявление РАЗРЕШАЕТ или ПРИВЕТСТВУЕТ профиль клиента — конфликта нет. "
-                    "Ответь только одним словом: да или нет"
-                )},
-            ],
-            temperature=0.0,
-            max_tokens=5,
-        )
-        answer = response.choices[0].message.content.strip().lower()
-        return answer.startswith("да")
-    except Exception:
+    answer = await _groq_request(
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": (
+                f"Требования объявления к жильцам: {tenant_requirements}\n"
+                f"Заметки о клиенте: {client_notes}\n\n"
+                "Запрещает ли объявление проживание этому клиенту? "
+                "Конфликт — это когда объявление ЗАПРЕЩАЕТ или ИСКЛЮЧАЕТ клиента (например БЖ при наличии животных, БД при наличии детей, 'только наши' для иностранца). "
+                "Если объявление РАЗРЕШАЕТ или ПРИВЕТСТВУЕТ профиль клиента — конфликта нет. "
+                "Ответь только одним словом: да или нет"
+            )},
+        ],
+        max_tokens=5,
+        temperature=0.0,
+    )
+    if not answer:
         return False  # при ошибке не блокируем
+    return answer.lower().startswith("да")
 
 
 def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
