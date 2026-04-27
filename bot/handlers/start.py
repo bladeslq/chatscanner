@@ -88,6 +88,9 @@ async def cmd_start(message: Message):
             "Для работы необходимо подключить Telegram-аккаунт.",
             reply_markup=kb.as_markup(),
         )
+        return
+
+    await _replace_main(message, _welcome_text(user), bottom_menu(user.is_working))
 
 
 # ── Inline "main_menu" callback (Назад from sub-menus) ───────────────
