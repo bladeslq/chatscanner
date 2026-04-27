@@ -22,7 +22,6 @@ from telethon.errors import (
 
 from database.db import get_user, update_user
 from userbot.scanner import scanner
-from bot.handlers.start import is_owner
 from bot.keyboards.menus import bottom_menu
 
 router = Router()
@@ -49,8 +48,6 @@ def _digits(s: str) -> str:
 
 @router.message(Command("auth"))
 async def cmd_auth(message: Message, state: FSMContext):
-    if not is_owner(message.from_user.id):
-        return
     user = await get_user(message.from_user.id)
     if user and user.is_authorized and user.session_string:
         await message.answer("✅ Аккаунт уже подключён.\n\nЧтобы переподключить — /reauth")
@@ -60,8 +57,6 @@ async def cmd_auth(message: Message, state: FSMContext):
 
 @router.message(Command("reauth"))
 async def cmd_reauth(message: Message, state: FSMContext):
-    if not is_owner(message.from_user.id):
-        return
     await update_user(message.from_user.id, is_authorized=False, session_string=None)
     await _start_phone_auth(message, state)
 
@@ -79,8 +74,6 @@ async def _start_phone_auth(message: Message, state: FSMContext):
 
 @router.message(AuthStates.waiting_phone, F.contact)
 async def got_contact(message: Message, state: FSMContext):
-    if not is_owner(message.from_user.id):
-        return
     if message.contact.user_id != message.from_user.id:
         await message.answer("❌ Отправь свой собственный контакт.")
         return
@@ -92,8 +85,6 @@ async def got_contact(message: Message, state: FSMContext):
 
 @router.message(AuthStates.waiting_phone, F.text)
 async def got_phone_text(message: Message, state: FSMContext):
-    if not is_owner(message.from_user.id):
-        return
     digits = _digits(message.text.strip())
     if len(digits) < 10:
         await message.answer("❌ Не похоже на номер. Введи в формате +79991234567.")
@@ -139,8 +130,6 @@ async def _request_code(message: Message, state: FSMContext, phone: str):
 
 @router.message(AuthStates.waiting_code)
 async def got_code(message: Message, state: FSMContext, bot: Bot):
-    if not is_owner(message.from_user.id):
-        return
     code = _digits(message.text)
     if len(code) < 4:
         await message.answer("❌ Слишком короткий код. Попробуй ещё раз:")
@@ -180,8 +169,6 @@ async def got_code(message: Message, state: FSMContext, bot: Bot):
 
 @router.message(AuthStates.waiting_2fa)
 async def got_2fa(message: Message, state: FSMContext, bot: Bot):
-    if not is_owner(message.from_user.id):
-        return
     password = message.text.strip()
     tg_client = await scanner.get_client(message.from_user.id)
     if not tg_client:

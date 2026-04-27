@@ -25,6 +25,14 @@ async def get_or_create_user(telegram_id: int, username: str = None, first_name:
         return user
 
 
+async def get_all_authorized_users() -> List[User]:
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).where(User.is_authorized == True, User.session_string.isnot(None))
+        )
+        return list(result.scalars().all())
+
+
 async def get_user(telegram_id: int) -> Optional[User]:
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))

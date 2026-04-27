@@ -3,7 +3,6 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
 from database.db import get_or_create_user, get_user, get_clients, get_monitored_chats, set_work_mode, update_user
 from bot.keyboards.menus import main_menu, bottom_menu, clients_menu, chats_menu
-from config import OWNER_ID
 
 router = Router()
 
@@ -12,7 +11,8 @@ _main_msgs: dict[int, int] = {}
 
 
 def is_owner(telegram_id: int) -> bool:
-    return telegram_id == OWNER_ID
+    """Kept for import compatibility with auth.py."""
+    return True
 
 
 def _welcome_text(user) -> str:
@@ -40,7 +40,6 @@ async def _edit_main(message: Message, text: str, reply_markup=None):
             )
             return
         except Exception:
-            # Edit failed — delete the stale message before sending fresh one
             try:
                 await message.bot.delete_message(tid, msg_id)
             except Exception:
@@ -73,17 +72,12 @@ async def _delete_user_msg(message: Message):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    if not is_owner(message.from_user.id):
-        await message.answer("Нет доступа.")
-        return
-
     user = await get_or_create_user(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
     )
 
-    # /start itself is a user message — delete it to keep chat clean
     await _delete_user_msg(message)
 
     text = _welcome_text(user)
@@ -122,7 +116,7 @@ async def cb_main_menu(call: CallbackQuery):
     await call.message.edit_text(
         _welcome_text(user),
         parse_mode="HTML",
-        reply_markup=main_menu(user.is_working),
+        reply_markup=None,
     )
     _main_msgs[call.from_user.id] = call.message.message_id
     await call.answer()
@@ -132,8 +126,6 @@ async def cb_main_menu(call: CallbackQuery):
 
 @router.message(F.text.in_({"Начать мониторинг", "Стоп мониторинг"}))
 async def btn_toggle_work(message: Message):
-    if not is_owner(message.from_user.id):
-        return
     await _delete_user_msg(message)
 
     from userbot.scanner import scanner
@@ -158,7 +150,6 @@ async def btn_toggle_work(message: Message):
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-    # Send a throwaway message just to update the reply keyboard text (Начать ↔ Стоп)
     kb_updater = await message.bot.send_message(
         message.from_user.id, "...", reply_markup=bottom_menu(new_state)
     )
@@ -174,8 +165,6 @@ async def btn_toggle_work(message: Message):
 
 @router.message(F.text == "Мои клиенты")
 async def btn_clients(message: Message):
-    if not is_owner(message.from_user.id):
-        return
     await _delete_user_msg(message)
     user = await get_user(message.from_user.id)
     if not user:
@@ -186,8 +175,6 @@ async def btn_clients(message: Message):
 
 @router.message(F.text == "Выбор чатов")
 async def btn_chats(message: Message):
-    if not is_owner(message.from_user.id):
-        return
     await _delete_user_msg(message)
     user = await get_user(message.from_user.id)
     if not user:
@@ -198,20 +185,15 @@ async def btn_chats(message: Message):
 
 @router.message(F.text == "Главная")
 async def btn_home(message: Message):
-    if not is_owner(message.from_user.id):
-        return
     await _delete_user_msg(message)
     user = await get_user(message.from_user.id)
     if not user:
         return
-    # Always replace to restore bottom keyboard if it was removed (e.g. after /auth flow)
     await _replace_main(message, _welcome_text(user), bottom_menu(user.is_working))
 
 
 @router.message(F.text == "Выйти")
 async def btn_logout(message: Message):
-    if not is_owner(message.from_user.id):
-        return
     await _delete_user_msg(message)
 
     user = await get_user(message.from_user.id)
@@ -221,11 +203,9 @@ async def btn_logout(message: Message):
 
     from userbot.scanner import scanner
 
-    # Stop monitoring first
     await set_work_mode(message.from_user.id, False)
     await scanner.stop_listening(message.from_user.id)
 
-    # Log out Telethon session
     try:
         client = scanner._clients.get(message.from_user.id)
         if client and client.is_connected():
@@ -233,7 +213,6 @@ async def btn_logout(message: Message):
     except Exception:
         pass
 
-    # Clear session from DB
     await update_user(message.from_user.id, is_authorized=False, session_string=None, is_working=False)
 
     await _edit_main(

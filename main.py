@@ -3,8 +3,8 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import BOT_TOKEN, OWNER_ID
-from database.db import init_db, get_user, get_monitored_chats
+from config import BOT_TOKEN
+from database.db import init_db, get_all_authorized_users, get_monitored_chats
 from userbot.scanner import scanner
 from bot.handlers import start, auth, clients, chats, work_mode
 
@@ -16,32 +16,33 @@ logger = logging.getLogger(__name__)
 
 
 async def restore_userbot_sessions(bot: Bot):
-    """On startup, restore sessions for authorized users and resume monitoring if was active."""
-    user = await get_user(OWNER_ID)
-    if not user or not user.session_string or not user.is_authorized:
-        logger.info("No saved userbot session found")
+    """On startup, restore sessions for all authorized users."""
+    users = await get_all_authorized_users()
+    if not users:
+        logger.info("No saved userbot sessions found")
         return
 
-    logger.info(f"Restoring userbot session for user {OWNER_ID}")
-    try:
-        tg_client = await scanner.create_client(OWNER_ID, user.session_string)
-        await tg_client.connect()
+    for user in users:
+        logger.info(f"Restoring userbot session for user {user.telegram_id}")
+        try:
+            tg_client = await scanner.create_client(user.telegram_id, user.session_string)
+            await tg_client.connect()
 
-        if not await tg_client.is_user_authorized():
-            logger.warning("Saved session is no longer valid")
-            return
+            if not await tg_client.is_user_authorized():
+                logger.warning(f"Session for {user.telegram_id} is no longer valid")
+                continue
 
-        me = await tg_client.get_me()
-        logger.info(f"Userbot restored: @{me.username}")
+            me = await tg_client.get_me()
+            logger.info(f"Userbot restored: @{me.username} ({user.telegram_id})")
 
-        if user.is_working:
-            monitored = await get_monitored_chats(user.id)
-            chat_ids = [c.chat_id for c in monitored]
-            if chat_ids:
-                await scanner.start_listening(OWNER_ID, chat_ids)
-                logger.info(f"Resumed monitoring {len(chat_ids)} chats")
-    except Exception as e:
-        logger.error(f"Failed to restore userbot session: {e}")
+            if user.is_working:
+                monitored = await get_monitored_chats(user.id)
+                chat_ids = [c.chat_id for c in monitored]
+                if chat_ids:
+                    await scanner.start_listening(user.telegram_id, chat_ids)
+                    logger.info(f"Resumed monitoring {len(chat_ids)} chats for {user.telegram_id}")
+        except Exception as e:
+            logger.error(f"Failed to restore session for {user.telegram_id}: {e}")
 
 
 async def main():
