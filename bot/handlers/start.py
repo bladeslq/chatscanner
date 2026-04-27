@@ -94,7 +94,7 @@ async def cmd_start(message: Message):
             await message.bot.edit_message_text(
                 chat_id=tid, message_id=msg_id,
                 text=text, parse_mode="HTML",
-                reply_markup=main_menu(user.is_working),
+                reply_markup=None,
             )
             return
         except Exception:
@@ -204,7 +204,8 @@ async def btn_home(message: Message):
     user = await get_user(message.from_user.id)
     if not user:
         return
-    await _edit_main(message, _welcome_text(user), None)
+    # Always replace to restore bottom keyboard if it was removed (e.g. after /auth flow)
+    await _replace_main(message, _welcome_text(user), bottom_menu(user.is_working))
 
 
 @router.message(F.text == "Выйти")

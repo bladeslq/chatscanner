@@ -23,6 +23,7 @@ from telethon.errors import (
 from database.db import get_user, update_user
 from userbot.scanner import scanner
 from bot.handlers.start import is_owner
+from bot.keyboards.menus import bottom_menu
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -220,10 +221,11 @@ async def _finish_auth(telegram_id: int, tg_client, bot: Bot):
         )
         await bot.send_message(
             telegram_id,
-            f"✅ <b>Аккаунт подключён!</b>\n\n"
-            f"👤 {me.first_name} (@{me.username})\n\n"
-            f"Теперь добавь чаты через меню — /start",
+            f"Аккаунт подключён!\n\n"
+            f"{me.first_name} (@{me.username})\n\n"
+            f"Теперь добавь чаты через меню.",
             parse_mode="HTML",
+            reply_markup=bottom_menu(False),
         )
         logger.info(f"User {telegram_id} authorized as @{me.username}")
     except Exception as e:
