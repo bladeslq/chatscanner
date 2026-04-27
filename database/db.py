@@ -143,8 +143,9 @@ def _message_hash(text: str) -> str:
 
 
 def _listing_fingerprint(listing: dict) -> str:
+    # floor excluded — it's often missing in short reposts of the same listing
     parts = "|".join(str(listing.get(f) or "") for f in (
-        "price", "rooms", "floor", "complex", "address"
+        "price", "rooms", "complex", "address"
     ))
     return hashlib.md5(parts.encode()).hexdigest()
 
