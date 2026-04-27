@@ -5,6 +5,7 @@ from aiogram.types import CallbackQuery
 
 from database.db import (
     get_user, set_work_mode, get_clients, get_monitored_chats, save_match,
+    is_duplicate_match,
 )
 from bot.keyboards.menus import main_menu
 from userbot.scanner import scanner
@@ -111,6 +112,10 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
         if not matches:
             continue
 
+        if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
+            logger.info(f"⏭ Дубликат, пропускаем для клиента {client.name}")
+            continue
+
         await save_match(
             user_id=user.id,
             client_id=client.id,
@@ -134,6 +139,7 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
     prop_type = PROPERTY_TYPES.get(listing.get("property_type", ""), listing.get("property_type", "—"))
     tr_type = TRANSACTION_TYPES.get(listing.get("transaction_type", ""), listing.get("transaction_type", "—"))
 
+    # Price
     price = listing.get("price")
     price_str = f"{int(price):,}".replace(",", " ") + " ₽" if price else "—"
     if price and listing.get("price_includes_utilities") is True:
@@ -141,56 +147,125 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
     elif price and listing.get("price_includes_utilities") is False:
         price_str += " + КУ"
 
+    # Deposit
     deposit = listing.get("deposit")
-    if deposit:
+    if deposit is not None and deposit > 0:
         dep_str = f"{int(deposit):,}".replace(",", " ") + " ₽"
         if listing.get("deposit_negotiable"):
             dep_str += " (делимый)"
+    elif deposit == 0:
+        dep_str = "нет залога"
     else:
         dep_str = None
 
+    # Area
     area = listing.get("area")
     area_str = f"{area} м²" if area else "—"
 
+    # Rooms
     rooms = listing.get("rooms")
     euro = listing.get("euro_format")
-    if rooms:
+    prop_t = listing.get("property_type")
+    if prop_t == "room":
+        rooms_str = "Комната"
+    elif rooms:
         rooms_str = f"{rooms}-комн." + (" (евро)" if euro else "")
     else:
         rooms_str = "—"
 
+    # Floor
+    floor = listing.get("floor")
+    floors_total = listing.get("floors_total")
+    if floor and floors_total:
+        floor_str = f"{floor}/{floors_total} эт."
+    elif floor:
+        floor_str = f"{floor} эт."
+    else:
+        floor_str = None
+
+    # Location
     district = listing.get("district") or "—"
     address = listing.get("address") or "—"
     complex_name = listing.get("complex")
+
+    # Owner / keys
+    owner_type = listing.get("owner_type")
+    owner_str = "Собственник" if owner_type == "owner" else ("Агент" if owner_type == "agent" else None)
+    has_keys = listing.get("has_keys")
+
+    # Condition
+    condition = listing.get("condition")
+    building_type = listing.get("building_type")
+
+    # Available until
+    available_until = listing.get("available_until")
+
+    # Commission / kickback
+    commission_percent = listing.get("commission_percent")
+    kickback_percent = listing.get("kickback_percent")
+    commission_shared = listing.get("commission_shared")
+
+    # Tenant requirements
+    tenant_req = listing.get("tenant_requirements")
+
     contact = listing.get("contact") or "—"
     description = listing.get("description") or ""
-    tenant_req = listing.get("tenant_requirements")
 
     score_stars = "⭐" * (score // 20) if score else ""
 
     lines = [
         f"🔔 <b>Объект для клиента: {client.name}</b>",
         f"Совпадение: {score}% {score_stars}",
-        f"",
+        "",
         f"📌 Чат: {chat_name}",
-        f"",
+        "",
         f"🏠 {tr_type} | {prop_type}",
-        f"🚪 Комнат: {rooms_str}",
+        f"🚪 {rooms_str}",
         f"📐 Площадь: {area_str}",
-        f"💰 Цена: {price_str}",
     ]
+    if floor_str:
+        lines.append(f"🏗 Этаж: {floor_str}")
+    lines.append(f"💰 Цена: {price_str}")
     if dep_str:
         lines.append(f"🔒 Залог: {dep_str}")
+
+    # Commission line
+    comm_parts = []
+    if commission_percent is not None:
+        comm_parts.append(f"комиссия {commission_percent}%")
+    if kickback_percent is not None:
+        comm_parts.append(f"откат {kickback_percent}%")
+    elif commission_shared:
+        comm_parts.append("С+")
+    if comm_parts:
+        lines.append(f"💼 {', '.join(comm_parts)}")
+
     lines += [
         f"🗺 Район: {district}",
         f"📍 Адрес: {address}",
     ]
     if complex_name:
         lines.append(f"🏢 ЖК: {complex_name}")
+
+    # Object details line
+    details = []
+    if owner_str:
+        details.append(owner_str)
+    if has_keys:
+        details.append("ключи есть")
+    if condition:
+        details.append(condition)
+    if building_type:
+        details.append(building_type)
+    if available_until:
+        details.append(f"до: {available_until}")
+    if details:
+        lines.append(f"🔑 {' · '.join(details)}")
+
     if tenant_req:
         lines.append(f"👥 Жильцы: {tenant_req}")
     lines.append(f"📞 Контакт: {contact}")
     if description:
         lines += ["", f"📝 {description[:300]}"]
-    lines += ["", "— — — — — — — — — —", f"<i>Исходное сообщение:</i>", f"<code>{raw_text[:500]}</code>"]
+    lines += ["", "— — — — — — — — — —", "<i>Исходное сообщение:</i>", f"<code>{raw_text[:500]}</code>"]
     return "\n".join(lines)

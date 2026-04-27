@@ -9,85 +9,116 @@ from database.models import Client
 _http_client = httpx.AsyncClient(verify=False)
 client = AsyncOpenAI(api_key=GROK_API_KEY, base_url=GROK_BASE_URL, http_client=_http_client)
 
-SYSTEM_PROMPT = """Ты — профессиональный аналитик рынка недвижимости Казани. Извлекаешь структурированные данные из сообщений Telegram-чатов риелторов.
+SYSTEM_PROMPT = """Ты — профессиональный аналитик рынка аренды квартир Казани. Извлекаешь структурированные данные из объявлений в Telegram-чатах риелторов.
 
-## Районы Казани
-Советский, Приволжский, Кировский, Вахитовский, Авиастроительный, Ново-Савиновский, Московский.
-Ты знаешь все улицы и ЖК Казани и определяешь район по ним. Если улица или ЖК могут быть в нескольких районах — указывай первый наиболее вероятный.
+Ты работаешь ТОЛЬКО с квартирами и комнатами. Дома, коттеджи, таунхаусы, дачи — игнорируй (is_listing: false).
 
-## Словарь сокращений казанских риелторов
+## ТИПЫ ОБЪЕКТОВ (только квартиры и комнаты)
 
-Тип жилья:
-- 1к / 2к / 3к — количество комнат
-- Евро1к / Евро2к / Евро3к — кухня-гостиная + спальни (Евро2к = 2 комнаты)
-- Студия / Гост / Гостинка — однокомнатная (rooms=1, euro_format=true)
+- Студия / Гост / Гостинка → property_type=apartment, rooms=1, euro_format=true
+- к/2к, комната в квартире → property_type=room, rooms=null
+- 1к → property_type=apartment, rooms=1, euro_format=false
+- 2к → property_type=apartment, rooms=2, euro_format=false
+- 3к → property_type=apartment, rooms=3, euro_format=false
+- Евро1к / Е1к — кухня-гостиная без отдельной спальни → rooms=1, euro_format=true
+- Евро2к / Е2к / Евро 2к — большая кухня-гостиная + 1 спальня → rooms=2, euro_format=true
+- Евро3к / Е3к — кухня-гостиная + 2 спальни → rooms=3, euro_format=true
+- Евро4к / Е4к — кухня-гостиная + 3 спальни → rooms=4, euro_format=true
 
-Состояние:
-- Простая — обычный ремонт
-- Дрова — плохое состояние
-- Хрущ — хрущёвка
-- Упак — полная комплектация мебелью и техникой
-- Пуля / Пушка — отличное предложение
+## ПРАВИЛО ЕВРО-ФОРМАТА ДЛЯ ПОДБОРА
+Евро-квартира подходит клиентам, ищущим N и N-1 комнат:
+- Евро2к → подходит тем, кто ищет 1к или 2к
+- Евро3к → подходит тем, кто ищет 2к или 3к
+- Евро4к → подходит тем, кто ищет 3к или 4к
+Сохрани это в поле euro_rooms_range: [N-1, N]
 
-Условия оплаты:
-- 50ку или 50 + ку — 50 тыс. + коммунальные услуги (price_includes_utilities=false)
-- 50сч или 50 + сч — 50 тыс. + счётчики (price_includes_utilities=false)
-- 50вв или 50 всё включено — всё включено, КУ=0 (price_includes_utilities=true)
+## СЛОВАРЬ АББРЕВИАТУР РИЕЛТОРОВ КАЗАНИ
 
-Залог:
-- залог 100% — залог равен цене аренды
-- залог 50% — залог равен половине цены
-- "можно разбить" / "в рассрочку" — залог делимый (deposit_negotiable=true)
+### Об объекте
+- Соб / Собственник / без агентов → owner_type=owner (не агент)
+- Ключи / ключи у риелтора / есть ключи → has_keys=true (оперативный показ)
+- До мая / до лета / на зиму → available_until=указанный срок (квартира сдаётся временно)
+- Упак — квартира полностью укомплектована мебелью и техникой → condition=упак
+- Простая — обычный ремонт → condition=простая
+- Дрова — плохое состояние / деревянная отделка → condition=дрова
+- Пуля / Пушка / Бомба — отличное соотношение цена/качество → condition=пуля
+- Хрущ / Хрущёвка → building_type=хрущёвка
+- Сталинка → building_type=сталинка
+- Брежневка / Ленинградка → building_type=брежневка
 
-Комиссия:
-- С+ — деление комиссии на 3 и более риелторов
+### Условия оплаты
+- 50ку / 50 + ку / 50+коммуналка → price=50000, price_includes_utilities=false (КУ по квитанции)
+- 50сч / 50 + сч / 50+счётчики → price=50000, price_includes_utilities=false (только счётчики)
+- 50вв / 50 всё включено / 50вкл / 50 ВВ → price=50000, price_includes_utilities=true (КУ платит собственник)
+- Если формат не указан → price_includes_utilities=null
+- КУ — коммунальные услуги; Сч — счётчики (свет, вода)
 
-Требования к жильцам:
+### Залог
+- Залог 100% → deposit = price (сумма аренды)
+- Залог 50% / залог ½ → deposit = price / 2
+- Делимый / можно разбить / рассрочка / 50/50 → deposit_negotiable=true
+- Без залога / залога нет → deposit=0
+
+### Комиссия и откат
+- Комиссия 50% / 100% и т.п. → commission_percent=число
+- Откат / отк / от — часть комиссии агенту-партнёру → kickback_percent=число
+- С+ — комиссия делится на 3+ риелторов → commission_shared=true
+
+### Требования к жильцам
 - СП — семейная пара
-- БД — без детей
-- БЖ — без животных
+- БД / Бд — без детей
+- БЖ / Бж — без животных
 - Наши — граждане РФ (русские / татары)
-- СНГ — граждане СНГ
+- СНГ — граждане стран СНГ
 - Ино — иностранцы (дальнее зарубежье)
 
-## Правила извлечения ЖК
-- Название ЖК часто пишут без префикса "ЖК" — отдельной строкой или после типа квартиры
-- Примеры: "Максат", "Светлая долина", "Солнечный город" — это названия ЖК, запиши в complex
-- Если видишь слово похожее на название жилого комплекса — запиши его в complex даже без "ЖК" перед ним
+## ПРАВИЛА ИЗВЛЕЧЕНИЯ
 
-## Правила извлечения
-- Евро2к считай как rooms=2 с euro_format=true
-- Студию / гостинку считай как rooms=1 с euro_format=true
-- Площадь "60кв" / "60м" / "60 метров" → 60
-- Залог в % пересчитывай в рубли от основной цены
-- Если указано "вв" → price_includes_utilities=true
-- Верни ТОЛЬКО JSON, без пояснений и markdown-блоков"""
+1. Тип сделки: в риелторских чатах по умолчанию аренда (rent). Продажа — только если явно указано.
+2. Площадь: "60кв" / "60м" / "60м²" / "60 метров" / "60 кв.м" → area=60
+3. Цена: только число в рублях. "35" в контексте аренды → 35000. "35т" / "35к" / "35тыс" → 35000.
+4. Залог в %: пересчитай в рубли от основной цены аренды.
+5. Этаж: "3/9" → floor=3, floors_total=9. "3 из 9" — то же самое.
+6. ЖК: названия пишут без "ЖК" — отдельной строкой или после типа квартиры. Если видишь похожее на название ЖК — запиши в complex.
+7. Контакт: извлеки имя + телефон или @ник. Если несколько — все через запятую.
+8. Дом/коттедж/таунхаус/дача/участок → is_listing=false, не извлекай.
+9. Если поле не упоминается — верни null.
+10. Верни ТОЛЬКО JSON без пояснений и markdown-блоков."""
 
 EXTRACTION_PROMPT = """Проанализируй сообщение из Telegram-чата риелторов Казани.
 
-Если это НЕ объявление о недвижимости — верни: {"is_listing": false}
+Если это НЕ объявление о квартире или комнате — верни: {"is_listing": false}
+Сюда относятся: дома, коттеджи, таунхаусы, дачи, участки, коммерция, вопросы, обсуждения.
 
-Если это объявление — верни JSON строго в таком формате:
+Если это объявление о квартире или комнате — верни JSON строго в таком формате (без markdown):
 {
   "is_listing": true,
-  "transaction_type": "sale" | "rent",
-  "property_type": "apartment" | "house" | "commercial" | "land" | "room",
+  "transaction_type": "rent" | "sale",
+  "property_type": "apartment" | "room",
   "rooms": число или null,
   "euro_format": true | false,
+  "euro_rooms_range": [число, число] | null,
   "price": число в рублях или null,
   "price_includes_utilities": true | false | null,
   "deposit": число в рублях или null,
   "deposit_negotiable": true | false | null,
   "area": число м² или null,
+  "floor": число или null,
+  "floors_total": число или null,
   "district": "район Казани" или null,
   "address": "улица и дом" или null,
   "complex": "название ЖК" или null,
-  "floor": число или null,
-  "floors_total": число или null,
-  "tenant_requirements": "требования к жильцам строкой" или null,
+  "building_type": "хрущёвка" | "сталинка" | "брежневка" | "новостройка" | "панель" | null,
+  "owner_type": "owner" | "agent" | null,
+  "has_keys": true | false | null,
+  "condition": "упак" | "простая" | "дрова" | "пуля" | null,
+  "available_until": "строка срока" | null,
+  "commission_percent": число или null,
+  "kickback_percent": число или null,
   "commission_shared": true | false | null,
-  "description": "краткое описание объекта",
-  "contact": "имя, телефон или @ник" или null
+  "tenant_requirements": "требования строкой" | null,
+  "description": "краткое описание: техника, мебель, инфраструктура, особенности",
+  "contact": "имя, телефон или @ник" | null
 }
 
 Сообщение:
@@ -105,11 +136,10 @@ async def extract_listing(message_text: str) -> dict:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": EXTRACTION_PROMPT + message_text},
             ],
-            temperature=0.2,
-            max_tokens=800,
+            temperature=0.1,
+            max_tokens=900,
         )
         content = response.choices[0].message.content.strip()
-        # extract JSON even if wrapped in ```json blocks
         match = re.search(r"\{.*\}", content, re.DOTALL)
         if match:
             return json.loads(match.group())
@@ -120,8 +150,11 @@ async def extract_listing(message_text: str) -> dict:
 
 def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
     """
-    Programmatically check if a listing matches a client's requirements.
+    Check if a listing matches a client's requirements.
     Returns (matches: bool, score: int 0-100).
+
+    Euro format rule: Евро2к matches clients looking for 1к or 2к, etc.
+    euro_rooms_range=[N-1, N] means the listing suits N-1 and N room seekers.
     """
     if not listing.get("is_listing"):
         return False, 0
@@ -135,26 +168,36 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
         if listing.get("transaction_type") == client_obj.transaction_type:
             score += 20
 
-    # property type
+    # property type — hard filter
     if client_obj.property_type:
         total_criteria += 20
         if listing.get("property_type") == client_obj.property_type:
             score += 20
         else:
-            return False, 0  # hard mismatch
+            return False, 0
 
-    # rooms
+    # rooms — with euro format expansion
     if client_obj.min_rooms or client_obj.max_rooms:
         total_criteria += 15
         rooms = listing.get("rooms")
         if rooms is not None:
-            if client_obj.min_rooms and rooms < client_obj.min_rooms:
-                return False, 0
-            if client_obj.max_rooms and rooms > client_obj.max_rooms:
-                return False, 0
+            euro_range = listing.get("euro_rooms_range")
+            if euro_range and len(euro_range) == 2:
+                # Euro apartment: compatible with euro_range[0] and euro_range[1] rooms
+                lo, hi = euro_range
+                client_min = client_obj.min_rooms or 0
+                client_max = client_obj.max_rooms or 99
+                # passes if client's range overlaps [lo, hi]
+                if client_max < lo or client_min > hi:
+                    return False, 0
+            else:
+                if client_obj.min_rooms and rooms < client_obj.min_rooms:
+                    return False, 0
+                if client_obj.max_rooms and rooms > client_obj.max_rooms:
+                    return False, 0
             score += 15
 
-    # price
+    # price — hard filter with 5% tolerance
     if client_obj.min_price or client_obj.max_price:
         total_criteria += 20
         price = listing.get("price")
@@ -165,7 +208,7 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
                 return False, 0
             score += 20
 
-    # area
+    # area — hard filter with 10% tolerance
     if client_obj.min_area or client_obj.max_area:
         total_criteria += 15
         area = listing.get("area")
@@ -176,8 +219,7 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
                 return False, 0
             score += 15
 
-    # district — hard filter: if client specified districts and listing district is known,
-    # it must match at least one; unknown district passes through
+    # district — hard filter: unknown district passes through
     if client_obj.districts:
         total_criteria += 10
         district = listing.get("district", "")
@@ -191,7 +233,7 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
             score += 10
 
     if total_criteria == 0:
-        return True, 50  # no criteria — all listings match
+        return True, 50
 
     final_score = int(score / total_criteria * 100) if total_criteria else 50
     return final_score >= 40, final_score

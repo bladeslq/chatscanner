@@ -1,3 +1,5 @@
+import hashlib
+from datetime import timedelta
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import select, update
 from typing import Optional, List
@@ -126,6 +128,19 @@ async def remove_monitored_chat(user_id: int, chat_id: int):
         await session.commit()
 
 
+# --- Deduplication helpers ---
+
+def _message_hash(text: str) -> str:
+    return hashlib.md5(text.strip().lower().encode()).hexdigest()
+
+
+def _listing_fingerprint(listing: dict) -> str:
+    parts = "|".join(str(listing.get(f) or "") for f in (
+        "price", "rooms", "floor", "complex", "address"
+    ))
+    return hashlib.md5(parts.encode()).hexdigest()
+
+
 # --- Matches ---
 
 async def get_client_matches(client_id: int, limit: int = 50) -> List[Match]:
@@ -138,6 +153,52 @@ async def get_client_matches(client_id: int, limit: int = 50) -> List[Match]:
         return list(result.scalars().all())
 
 
+async def is_duplicate_match(
+    user_id: int,
+    client_id: int,
+    chat_id: int,
+    message_id: int,
+    message_text: str,
+    listing: dict,
+    window_hours: int = 48,
+) -> bool:
+    """Return True if this listing was already sent to this client recently."""
+    from datetime import datetime, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+
+    msg_hash = _message_hash(message_text)
+    fingerprint = _listing_fingerprint(listing)
+
+    async with async_session() as session:
+        base = (
+            select(Match)
+            .where(Match.user_id == user_id, Match.client_id == client_id)
+        )
+
+        # 1. same Telegram message (e.g. edited or re-processed)
+        r = await session.execute(
+            base.where(Match.chat_id == chat_id, Match.message_id == message_id)
+        )
+        if r.scalar_one_or_none():
+            return True
+
+        # 2. exact text repost in any chat
+        r = await session.execute(
+            base.where(Match.message_hash == msg_hash, Match.sent_at >= cutoff)
+        )
+        if r.scalar_one_or_none():
+            return True
+
+        # 3. same apartment, different wording
+        r = await session.execute(
+            base.where(Match.listing_fingerprint == fingerprint, Match.sent_at >= cutoff)
+        )
+        if r.scalar_one_or_none():
+            return True
+
+    return False
+
+
 async def save_match(user_id: int, client_id: int, chat_id: int, chat_name: str,
                      message_id: int, message_text: str, extracted_data: dict, match_score: int) -> Match:
     async with async_session() as session:
@@ -145,6 +206,8 @@ async def save_match(user_id: int, client_id: int, chat_id: int, chat_name: str,
             user_id=user_id, client_id=client_id, chat_id=chat_id, chat_name=chat_name,
             message_id=message_id, message_text=message_text,
             extracted_data=extracted_data, match_score=match_score,
+            message_hash=_message_hash(message_text),
+            listing_fingerprint=_listing_fingerprint(extracted_data),
         )
         session.add(match)
         await session.commit()

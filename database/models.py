@@ -112,6 +112,9 @@ class Match(Base):
     extracted_data = Column(JSON)
     match_score = Column(Integer)
     sent_at = Column(DateTime, default=datetime.utcnow)
+    # deduplication
+    message_hash = Column(String(64))        # MD5 of raw text — exact repost across chats
+    listing_fingerprint = Column(String(64)) # MD5 of key listing fields — same flat, different wording
 
     user = relationship("User", back_populates="matches")
     client = relationship("Client", back_populates="matches")
