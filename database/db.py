@@ -13,6 +13,14 @@ async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncS
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # add columns that may be missing in existing DBs
+        for col, coltype in [("message_hash", "VARCHAR(64)"), ("listing_fingerprint", "VARCHAR(64)")]:
+            try:
+                await conn.execute(
+                    __import__("sqlalchemy").text(f"ALTER TABLE matches ADD COLUMN {col} {coltype}")
+                )
+            except Exception:
+                pass  # column already exists
 
 
 async def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None) -> User:
