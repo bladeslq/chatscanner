@@ -81,7 +81,7 @@ async def cb_client_view(call: CallbackQuery, state: FSMContext):
     text = (
         f"<b>{client.name}</b>\n"
         f"Номер для связи — {client.phone or '—'}\n\n"
-        f"<b>Требования:</b>\n\n"
+        f"<b>Требования:</b>\n"
         f"{reqs}"
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=client_actions(client_id))
