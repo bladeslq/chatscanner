@@ -16,6 +16,24 @@ from config import DADATA_API_KEY, DADATA_SECRET_KEY, KAZAN_DISTRICTS, KAZAN_COM
 
 FUZZY_THRESHOLD = 0.65  # min similarity ratio to accept a match
 
+_CYR_TO_LAT = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
+    'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
+    'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n',
+    'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
+    'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch',
+    'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '',
+    'э': 'e', 'ю': 'yu', 'я': 'ya',
+}
+
+
+def _to_latin(text: str) -> str:
+    """Transliterate Cyrillic → Latin so mixed-script names can be compared."""
+    return ''.join(_CYR_TO_LAT.get(c, c) for c in text.lower())
+
+
+_COMPLEXES_LATIN: dict[str, str] = {_to_latin(k): v for k, v in KAZAN_COMPLEXES.items()}
+
 logger = logging.getLogger(__name__)
 
 _CLEAN_URL = "https://cleaner.dadata.ru/api/v1/clean/address"
@@ -79,20 +97,46 @@ async def _clean_district(address: str) -> str | None:
 
 
 def _lookup_local(complex_name: str) -> str | None:
-    """Check local KAZAN_COMPLEXES with substring + fuzzy matching."""
-    name_lower = complex_name.lower().strip()
+    """Check local KAZAN_COMPLEXES with substring + fuzzy matching.
+    Both query and keys are transliterated to Latin so Cyrillic/Latin
+    variants (e.g. 'арт сити' vs 'art city') match each other.
+    """
+    name_latin = _to_latin(complex_name.strip())
+
+    # Strip leading "жк " / "жилой комплекс " prefixes before matching
+    for prefix in ("zhiloy kompleks ", "zhk "):
+        if name_latin.startswith(prefix):
+            name_latin = name_latin[len(prefix):]
+            break
+
+    # Very short query (≤3 chars): only allow exact match (catches «UNO», «ЖК IQ»)
+    if len(name_latin) <= 3:
+        return _COMPLEXES_LATIN.get(name_latin)
+
     best_district = None
     best_ratio = 0.0
+    best_substring: tuple[int, str] | None = None  # (key_len, district)
 
-    for key, district in KAZAN_COMPLEXES.items():
-        # Exact substring match — highest priority
-        if key in name_lower or name_lower in key:
-            return district
-        # Fuzzy match for typos / 1-2 wrong letters
-        ratio = SequenceMatcher(None, name_lower, key).ratio()
+    for key_latin, district in _COMPLEXES_LATIN.items():
+        # query is contained in the key: require query covers ≥40% of key
+        if name_latin in key_latin and len(name_latin) / len(key_latin) >= 0.4:
+            if best_substring is None or len(key_latin) < best_substring[0]:
+                best_substring = (len(key_latin), district)
+            continue
+        # key is contained in query: skip very short keys (≤4 chars) to
+        # prevent «uno» matching inside «runo», «азия» inside «евразия»
+        if key_latin in name_latin and len(key_latin) >= 5:
+            if best_substring is None or len(key_latin) > best_substring[0]:
+                best_substring = (len(key_latin), district)
+            continue
+        # Fuzzy match for typos / transliteration gaps
+        ratio = SequenceMatcher(None, name_latin, key_latin).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
             best_district = district
+
+    if best_substring is not None:
+        return best_substring[1]
 
     if best_ratio >= FUZZY_THRESHOLD:
         logger.debug(f"Fuzzy match '{complex_name}' → '{best_district}' ({best_ratio:.0%})")
