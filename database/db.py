@@ -151,6 +151,15 @@ def _listing_fingerprint(listing: dict) -> str:
 
 # --- Matches ---
 
+async def delete_match(match_id: int):
+    async with async_session() as session:
+        result = await session.execute(select(Match).where(Match.id == match_id))
+        match = result.scalar_one_or_none()
+        if match:
+            await session.delete(match)
+            await session.commit()
+
+
 async def get_client_matches(client_id: int, limit: int = 50) -> List[Match]:
     async with async_session() as session:
         q = (select(Match)

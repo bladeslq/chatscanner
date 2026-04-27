@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database.db import get_clients, get_client, create_client, update_client, delete_client, get_user, get_client_matches
+from database.db import get_clients, get_client, create_client, update_client, delete_client, get_user, get_client_matches, delete_match
 from bot.keyboards.menus import (
     clients_menu, client_actions,
     districts_kb, skip_kb, back_kb, confirm_kb,
@@ -132,69 +132,46 @@ async def cb_client_matches(call: CallbackQuery):
     page = max(0, min(page, total - 1))
     match = matches[page]
     text = _build_match_card(match, page, total)
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=_match_nav_kb(client_id, page, total))
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=_match_nav_kb(client_id, match.id, page, total))
+
+
+@router.callback_query(F.data.startswith("match_reject:"))
+async def cb_match_reject(call: CallbackQuery):
+    _, client_id, match_id, page = call.data.split(":")
+    client_id, match_id, page = int(client_id), int(match_id), int(page)
+
+    await delete_match(match_id)
+
+    matches = await get_client_matches(client_id)
+    if not matches:
+        client = await get_client(client_id)
+        await call.message.edit_text(
+            f"<b>{client.name}</b>\n\n📭 Подходящих объектов пока нет",
+            parse_mode="HTML",
+            reply_markup=back_kb(f"client_view:{client_id}"),
+        )
+        return
+
+    page = max(0, min(page, len(matches) - 1))
+    match = matches[page]
+    await call.message.edit_text(
+        _build_match_card(match, page, len(matches)),
+        parse_mode="HTML",
+        reply_markup=_match_nav_kb(client_id, match.id, page, len(matches)),
+    )
 
 
 def _build_match_card(match, page: int, total: int) -> str:
-    d = match.extracted_data or {}
-    prop = PROPERTY_TYPES.get(d.get("property_type", ""), d.get("property_type") or "—")
-    tr = TRANSACTION_TYPES.get(d.get("transaction_type", ""), d.get("transaction_type") or "—")
-
-    price = d.get("price")
-    if price:
-        price_str = f"{int(price):,}".replace(",", " ") + " ₽"
-        if d.get("price_includes_utilities") is True:
-            price_str += " (вкл.)"
-        elif d.get("price_includes_utilities") is False:
-            price_str += " + КУ"
-    else:
-        price_str = "—"
-
-    rooms = d.get("rooms")
-    rooms_str = f"{rooms}-комн." + (" (евро)" if d.get("euro_format") else "") if rooms else "—"
-    area = d.get("area")
-    area_str = f"{area} м²" if area else "—"
-
-    deposit = d.get("deposit")
-    dep_str = f"{int(deposit):,}".replace(",", " ") + " ₽" if deposit else None
-    if dep_str and d.get("deposit_negotiable"):
-        dep_str += " (делимый)"
-
-    district = d.get("district") or "—"
-    address = d.get("address") or ""
-    complex_name = d.get("complex") or ""
-    contact = d.get("contact") or "—"
-    description = d.get("description") or ""
-    score = match.match_score or 0
-    stars = "⭐" * (score // 20)
     dt = match.sent_at.strftime("%d.%m %H:%M") if match.sent_at else ""
-
     lines = [
-        f"🏠 <b>{tr} · {prop}</b>   <i>{page + 1}/{total}</i>",
-        f"📌 {match.chat_name}  ·  {dt}  ·  {score}% {stars}",
+        f"<b>{page + 1}/{total}</b>  ·  {match.chat_name}  ·  {dt}",
         "",
-        f"🚪 {rooms_str}  ·  📐 {area_str}",
-        f"💰 {price_str}",
+        f"<code>{match.message_text[:800] if match.message_text else '—'}</code>",
     ]
-    if dep_str:
-        lines.append(f"🔒 Залог: {dep_str}")
-    lines += [f"🗺 {district}"]
-    if address:
-        lines.append(f"📍 {address}")
-    if complex_name:
-        lines.append(f"🏢 ЖК {complex_name}")
-    tenant = d.get("tenant_requirements")
-    if tenant:
-        lines.append(f"👥 {tenant}")
-    lines.append(f"📞 {contact}")
-    if description:
-        lines += ["", f"<i>{description[:250]}</i>"]
-    if match.message_text:
-        lines += ["", "— — — — — — — — — —", f"<code>{match.message_text[:400]}</code>"]
     return "\n".join(lines)
 
 
-def _match_nav_kb(client_id: int, page: int, total: int):
+def _match_nav_kb(client_id: int, match_id: int, page: int, total: int):
     kb = InlineKeyboardBuilder()
     nav = []
     if page > 0:
@@ -204,7 +181,11 @@ def _match_nav_kb(client_id: int, page: int, total: int):
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"client_matches:{client_id}:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.row(InlineKeyboardButton(text="◀️ К клиенту", callback_data=f"client_view:{client_id}"))
+    kb.row(
+        InlineKeyboardButton(text="Подошла", callback_data="noop"),
+        InlineKeyboardButton(text="Не подошла", callback_data=f"match_reject:{client_id}:{match_id}:{page}"),
+    )
+    kb.row(InlineKeyboardButton(text="Вернуться к клиенту", callback_data=f"client_view:{client_id}"))
     return kb.as_markup()
 
 
