@@ -62,7 +62,7 @@ async def cmd_auth(message: Message, state: FSMContext):
         pass
     user = await get_user(message.from_user.id)
     if user and user.is_authorized and user.session_string:
-        msg = await message.answer("✅ Аккаунт уже подключён.\n\nЧтобы переподключить — /reauth")
+        msg = await message.answer("Аккаунт уже подключён — ✅\n\nЧтобы переподключить — /reauth")
         asyncio.create_task(_delete_after(msg, 5))
         return
     await _start_phone_auth(message, state)

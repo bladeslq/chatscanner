@@ -113,7 +113,7 @@ async def cb_main_menu(call: CallbackQuery):
 
 # ── Bottom reply-keyboard handlers ───────────────────────────────────
 
-@router.message(F.text.in_({"Начать мониторинг", "Стоп мониторинг"}))
+@router.message(F.text.in_({"Начать мониторинг", "Остановить мониторинг"}))
 async def btn_toggle_work(message: Message):
     await _delete_user_msg(message)
 

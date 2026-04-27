@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database.db import get_clients, get_client, create_client, update_client, delete_client, get_user, get_client_matches
 from bot.keyboards.menus import (
-    clients_menu, client_actions, property_type_kb,
+    clients_menu, client_actions,
     districts_kb, skip_kb, back_kb, confirm_kb,
 )
 from config import PROPERTY_TYPES, TRANSACTION_TYPES, KAZAN_DISTRICTS
@@ -25,13 +25,10 @@ class ClientEdit(StatesGroup):
 class ClientAdd(StatesGroup):
     name = State()
     phone = State()
-    property_type = State()
     rooms_min = State()
     rooms_max = State()
     price_min = State()
     price_max = State()
-    area_min = State()
-    area_max = State()
     districts = State()
     notes = State()
 
@@ -61,12 +58,11 @@ async def _del(message: Message):
 async def cb_clients_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
     user = await get_user(call.from_user.id)
-    clients = await get_clients(user.id, active_only=False)
-    active = [c for c in clients if c.is_active]
+    clients = await get_clients(user.id, active_only=True)
     text = (
-        f"👥 <b>Клиенты</b> ({len(active)} активных)\n\nВыбери клиента:"
-        if clients else
-        "👥 <b>Клиенты</b>\n\nСписок пуст. Добавь первого клиента:"
+        "<b>Здесь список ваших клиентов.</b>\n\n"
+        "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их.\n\n"
+        f"<b>Активных: {len(clients)}</b>"
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=clients_menu(clients))
 
@@ -81,12 +77,12 @@ async def cb_client_view(call: CallbackQuery, state: FSMContext):
     if not client:
         await call.answer("Клиент не найден")
         return
-    status = "✅ Активен" if client.is_active else "❌ Отключён"
+    reqs = "\n".join(client.requirements_text().split(" | "))
     text = (
-        f"<b>{client.name}</b>\n"
-        f"Статус: {status}\n"
-        f"📞 {client.phone or '—'}\n\n"
-        f"<b>Требования:</b>\n{client.requirements_text()}"
+        f"<b>{client.name}</b>\n\n"
+        f"Номер для связи — {client.phone or '—'}\n\n"
+        f"Требования:\n\n"
+        f"{reqs}"
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=client_actions(client_id))
 
@@ -211,9 +207,11 @@ async def cb_client_delete_yes(call: CallbackQuery):
     await delete_client(client_id)
     await call.answer("✅ Клиент удалён")
     user = await get_user(call.from_user.id)
-    clients = await get_clients(user.id, active_only=False)
+    clients = await get_clients(user.id, active_only=True)
     await call.message.edit_text(
-        "👥 <b>Клиенты</b>",
+        "<b>Здесь список ваших клиентов.</b>\n\n"
+        "Укажите новых клиентов или нажмите на текущие, чтобы редактировать их.\n\n"
+        f"<b>Активных: {len(clients)}</b>",
         parse_mode="HTML",
         reply_markup=clients_menu(clients),
     )
@@ -224,13 +222,10 @@ async def cb_client_delete_yes(call: CallbackQuery):
 EDIT_FIELDS = {
     "name": "Имя",
     "phone": "Телефон",
-    "property_type": "Тип объекта",
     "min_rooms": "Мин. комнат",
     "max_rooms": "Макс. комнат",
     "min_price": "Мин. цена (₽)",
     "max_price": "Макс. цена (₽)",
-    "min_area": "Мин. площадь (м²)",
-    "max_area": "Макс. площадь (м²)",
     "districts": "Районы",
     "notes": "Заметки",
 }
@@ -303,9 +298,6 @@ async def cb_edit_field(call: CallbackQuery, state: FSMContext):
             parse_mode="HTML",
             reply_markup=_with_back(districts_kb(current)),
         )
-    elif field == "property_type":
-        await state.set_state(ClientEdit.editing_property)
-        await call.message.edit_text("Тип объекта:", reply_markup=_with_back(property_type_kb()))
     else:
         await state.set_state(ClientEdit.editing_value)
         back_kb = InlineKeyboardBuilder()
@@ -433,27 +425,16 @@ async def process_name(message: Message, state: FSMContext):
 @router.callback_query(F.data == "skip_phone", ClientAdd.phone)
 async def skip_phone(call: CallbackQuery, state: FSMContext):
     await state.update_data(phone=None)
-    await state.set_state(ClientAdd.property_type)
-    await call.message.edit_text("Тип объекта:", reply_markup=property_type_kb())
+    await state.set_state(ClientAdd.rooms_min)
+    await call.message.edit_text("🚪 Минимальное кол-во комнат:", reply_markup=skip_kb("skip_rooms_min"))
 
 
 @router.message(ClientAdd.phone)
 async def process_phone(message: Message, state: FSMContext):
     await state.update_data(phone=message.text.strip())
     await _del(message)
-    await state.set_state(ClientAdd.property_type)
-    await _next(message.bot, state, "Тип объекта:", property_type_kb())
-
-
-@router.callback_query(F.data.startswith("prop_type:"), ClientAdd.property_type)
-async def process_property_type(call: CallbackQuery, state: FSMContext):
-    val = call.data.split(":")[1]
-    await state.update_data(property_type=None if val == "any" else val)
     await state.set_state(ClientAdd.rooms_min)
-    await call.message.edit_text(
-        "🚪 Минимальное кол-во комнат (цифра, напр. 1):",
-        reply_markup=skip_kb("skip_rooms_min"),
-    )
+    await _next(message.bot, state, "🚪 Минимальное кол-во комнат:", skip_kb("skip_rooms_min"))
 
 
 @router.callback_query(F.data == "skip_rooms_min", ClientAdd.rooms_min)
@@ -525,8 +506,9 @@ async def process_price_min(message: Message, state: FSMContext):
 @router.callback_query(F.data == "skip_price_max", ClientAdd.price_max)
 async def skip_price_max(call: CallbackQuery, state: FSMContext):
     await state.update_data(max_price=None)
-    await state.set_state(ClientAdd.area_min)
-    await call.message.edit_text("📐 Минимальная площадь (м²):", reply_markup=skip_kb("skip_area_min"))
+    await state.set_state(ClientAdd.districts)
+    await state.update_data(selected_districts=[])
+    await call.message.edit_text("🗺 Районы Казани (выбери один или несколько, или «Все»):", reply_markup=districts_kb([]))
 
 
 @router.message(ClientAdd.price_max)
@@ -539,59 +521,9 @@ async def process_price_max(message: Message, state: FSMContext):
         return
     await state.update_data(max_price=val)
     await _del(message)
-    await state.set_state(ClientAdd.area_min)
-    await _next(message.bot, state, "📐 Минимальная площадь (м²):", skip_kb("skip_area_min"))
-
-
-@router.callback_query(F.data == "skip_area_min", ClientAdd.area_min)
-async def skip_area_min(call: CallbackQuery, state: FSMContext):
-    await state.update_data(min_area=None)
-    await state.set_state(ClientAdd.area_max)
-    await call.message.edit_text("📐 Максимальная площадь (м²):", reply_markup=skip_kb("skip_area_max"))
-
-
-@router.message(ClientAdd.area_min)
-async def process_area_min(message: Message, state: FSMContext):
-    try:
-        val = float(message.text.strip())
-    except ValueError:
-        await _del(message)
-        await _next(message.bot, state, "❌ Введи только число:", skip_kb("skip_area_min"))
-        return
-    await state.update_data(min_area=val)
-    await _del(message)
-    await state.set_state(ClientAdd.area_max)
-    await _next(message.bot, state, "📐 Максимальная площадь (м²):", skip_kb("skip_area_max"))
-
-
-@router.callback_query(F.data == "skip_area_max", ClientAdd.area_max)
-async def skip_area_max(call: CallbackQuery, state: FSMContext):
-    await state.update_data(max_area=None)
     await state.set_state(ClientAdd.districts)
     await state.update_data(selected_districts=[])
-    await call.message.edit_text(
-        "🗺 Районы Казани (выбери один или несколько, или «Все»):",
-        reply_markup=districts_kb([]),
-    )
-
-
-@router.message(ClientAdd.area_max)
-async def process_area_max(message: Message, state: FSMContext):
-    try:
-        val = float(message.text.strip())
-    except ValueError:
-        await _del(message)
-        await _next(message.bot, state, "❌ Введи только число:", skip_kb("skip_area_max"))
-        return
-    await state.update_data(max_area=val)
-    await _del(message)
-    await state.set_state(ClientAdd.districts)
-    await state.update_data(selected_districts=[])
-    await _next(
-        message.bot, state,
-        "🗺 Районы Казани (выбери один или несколько, или «Все»):",
-        districts_kb([]),
-    )
+    await _next(message.bot, state, "🗺 Районы Казани (выбери один или несколько, или «Все»):", districts_kb([]))
 
 
 @router.callback_query(F.data.startswith("district:"), ClientAdd.districts)
@@ -644,14 +576,11 @@ async def _save_client(telegram_id: int, bot: Bot, state: FSMContext):
         user_id=user.id,
         name=data.get("name"),
         phone=data.get("phone"),
-        transaction_type=data.get("transaction_type"),
-        property_type=data.get("property_type"),
+        property_type="apartment",
         min_rooms=data.get("min_rooms"),
         max_rooms=data.get("max_rooms"),
         min_price=data.get("min_price"),
         max_price=data.get("max_price"),
-        min_area=data.get("min_area"),
-        max_area=data.get("max_area"),
         districts=data.get("selected_districts") or data.get("districts"),
         notes=data.get("notes"),
     )
