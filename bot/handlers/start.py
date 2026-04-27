@@ -19,7 +19,7 @@ def _welcome_text(user) -> str:
     monitoring = "✅" if user.is_working else "❌"
     auth = "✅" if user.is_authorized else "❌"
     return (
-        f"Привет, {user.first_name or 'риелтор'}!\n\n"
+        f"<b>Привет, {user.first_name or 'риелтор'}!</b>\n\n"
         f"Статус мониторинга: {monitoring}\n"
         f"Статус аккаунта: {auth}"
     )
