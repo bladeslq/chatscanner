@@ -1,5 +1,6 @@
 import re
 import logging
+import asyncio
 
 from aiogram import Router, Bot, F
 from aiogram.types import (
@@ -61,7 +62,8 @@ async def cmd_auth(message: Message, state: FSMContext):
         pass
     user = await get_user(message.from_user.id)
     if user and user.is_authorized and user.session_string:
-        await message.answer("✅ Аккаунт уже подключён.\n\nЧтобы переподключить — /reauth")
+        msg = await message.answer("✅ Аккаунт уже подключён.\n\nЧтобы переподключить — /reauth")
+        asyncio.create_task(_delete_after(msg, 5))
         return
     await _start_phone_auth(message, state)
 
@@ -240,6 +242,14 @@ async def got_2fa(message: Message, state: FSMContext, bot: Bot):
     auth_msgs = (await state.get_data()).get("auth_msgs", [])
     await state.clear()
     await _finish_auth(message.from_user.id, tg_client, bot, auth_msgs)
+
+
+async def _delete_after(message: Message, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 async def _finish_auth(telegram_id: int, tg_client, bot: Bot, auth_msgs: list = None):
