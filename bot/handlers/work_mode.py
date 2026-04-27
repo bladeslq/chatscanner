@@ -123,6 +123,12 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
         )
         logger.info(f"💾 Сохранён матч для клиента {client.name} (score={score}%)")
 
+        try:
+            notification = _build_notification(client, listing, chat_name, score, text)
+            await _bot.send_message(telegram_id, notification, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления для {telegram_id}: {e}")
+
 
 def _build_notification(client, listing: dict, chat_name: str, score: int, raw_text: str) -> str:
     prop_type = PROPERTY_TYPES.get(listing.get("property_type", ""), listing.get("property_type", "—"))
