@@ -1,17 +1,47 @@
 import json
 import re
 import asyncio
+import logging
 import httpx
 from openai import AsyncOpenAI
 from config import GROK_API_KEY, GROK_BASE_URL, GROK_MODEL
 from database.models import Client
 
-# Kaspersky intercepts TLS on Windows — disable cert verification
+logger = logging.getLogger(__name__)
+
+# Kaspersky intercepts TLS on Windows — disable cert verification.
+# max_retries=0 — we manage retries ourselves; SDK's built-in 58s retry would
+# block the semaphore and cascade timeouts during 429 storms.
 _http_client = httpx.AsyncClient(verify=False)
-client = AsyncOpenAI(api_key=GROK_API_KEY, base_url=GROK_BASE_URL, http_client=_http_client)
+client = AsyncOpenAI(
+    api_key=GROK_API_KEY,
+    base_url=GROK_BASE_URL,
+    http_client=_http_client,
+    max_retries=0,
+)
 
 # Global semaphore — max 2 concurrent Groq requests across all users
 _groq_sem = asyncio.Semaphore(2)
+
+
+# Global pause flag: when set, all callers skip Groq cheaply (return None)
+# until this timestamp passes. Set after exhausting 429 retries.
+# Messages received during the pause are dropped — once the API recovers,
+# only NEW messages are processed.
+_paused_until: float = 0.0
+
+
+def is_paused() -> bool:
+    loop = asyncio.get_event_loop()
+    return loop.time() < _paused_until
+
+
+def _set_pause(seconds: float):
+    global _paused_until
+    loop = asyncio.get_event_loop()
+    target = loop.time() + seconds
+    if target > _paused_until:
+        _paused_until = target
 
 SYSTEM_PROMPT = """Ты — профессиональный аналитик рынка аренды квартир Казани. Извлекаешь структурированные данные из объявлений в Telegram-чатах риелторов.
 
@@ -129,7 +159,16 @@ EXTRACTION_PROMPT = """Проанализируй сообщение из Telegr
 
 
 async def _groq_request(messages: list, max_tokens: int, temperature: float = 0.1) -> str | None:
-    """Make a Groq API request with semaphore and retry on 429."""
+    """Make a Groq API request.
+
+    On 429: short retry, then activate a global pause and skip subsequent
+    callers cheaply (returns None) until the pause window passes.
+    Messages received during the pause are simply dropped — once the API
+    recovers, only NEW messages are processed.
+    """
+    if is_paused():
+        return None
+
     async with _groq_sem:
         for attempt in range(3):
             try:
@@ -141,9 +180,18 @@ async def _groq_request(messages: list, max_tokens: int, temperature: float = 0.
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
-                if "429" in str(e) and attempt < 2:
-                    await asyncio.sleep(2 ** attempt * 3)  # 3s, 6s
+                msg = str(e)
+                if "429" in msg:
+                    if attempt < 2:
+                        await asyncio.sleep(2 ** attempt * 3)  # 3s, 6s
+                        continue
+                    _set_pause(30.0)
+                    logger.warning("Groq 429 — pausing extraction for 30s")
+                    return None
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt * 2)
                     continue
+                logger.warning(f"Groq transient error after retries: {e}")
                 return None
     return None
 
