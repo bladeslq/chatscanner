@@ -323,48 +323,49 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
         else:
             return False, 0
 
-    # rooms — with euro format expansion
+    # rooms — strict hard filter. Missing rooms with client's rooms requirement = reject.
     if client_obj.min_rooms or client_obj.max_rooms:
         total_criteria += 15
         rooms = listing.get("rooms")
-        if rooms is not None:
-            euro_range = listing.get("euro_rooms_range")
-            if euro_range and len(euro_range) == 2:
-                # Euro apartment: compatible with euro_range[0] and euro_range[1] rooms
-                lo, hi = euro_range
-                client_min = client_obj.min_rooms or 0
-                client_max = client_obj.max_rooms or 99
-                # passes if client's range overlaps [lo, hi]
-                if client_max < lo or client_min > hi:
-                    return False, 0
-            else:
-                if client_obj.min_rooms and rooms < client_obj.min_rooms:
-                    return False, 0
-                if client_obj.max_rooms and rooms > client_obj.max_rooms:
-                    return False, 0
-            score += 15
+        euro_range = listing.get("euro_rooms_range")
+        if rooms is None and not euro_range:
+            return False, 0
+        if euro_range and len(euro_range) == 2:
+            lo, hi = euro_range
+            client_min = client_obj.min_rooms or 0
+            client_max = client_obj.max_rooms or 99
+            if client_max < lo or client_min > hi:
+                return False, 0
+        else:
+            if client_obj.min_rooms and rooms < client_obj.min_rooms:
+                return False, 0
+            if client_obj.max_rooms and rooms > client_obj.max_rooms:
+                return False, 0
+        score += 15
 
-    # price — hard filter with 5% tolerance
+    # price — strict hard filter with 5% tolerance. Missing price = reject.
     if client_obj.min_price or client_obj.max_price:
         total_criteria += 20
         price = listing.get("price")
-        if price is not None:
-            if client_obj.min_price and price < client_obj.min_price * 0.95:
-                return False, 0
-            if client_obj.max_price and price > client_obj.max_price * 1.05:
-                return False, 0
-            score += 20
+        if price is None:
+            return False, 0
+        if client_obj.min_price and price < client_obj.min_price * 0.95:
+            return False, 0
+        if client_obj.max_price and price > client_obj.max_price * 1.05:
+            return False, 0
+        score += 20
 
-    # area — hard filter with 10% tolerance
+    # area — strict hard filter with 10% tolerance. Missing area = reject.
     if client_obj.min_area or client_obj.max_area:
         total_criteria += 15
         area = listing.get("area")
-        if area is not None:
-            if client_obj.min_area and area < client_obj.min_area * 0.9:
-                return False, 0
-            if client_obj.max_area and area > client_obj.max_area * 1.1:
-                return False, 0
-            score += 15
+        if area is None:
+            return False, 0
+        if client_obj.min_area and area < client_obj.min_area * 0.9:
+            return False, 0
+        if client_obj.max_area and area > client_obj.max_area * 1.1:
+            return False, 0
+        score += 15
 
     # district — strict hard filter. Unknown district is normalized to "Пригород"
     # by enrich_district(), so listing.district is always set when is_listing=true.
