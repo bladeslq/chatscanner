@@ -49,10 +49,7 @@ class Client(Base):
     matches = relationship("Match", back_populates="client", cascade="all, delete-orphan")
 
     def requirements_text(self) -> str:
-        from config import PROPERTY_TYPES, TRANSACTION_TYPES
         parts = []
-        if self.transaction_type:
-            parts.append(TRANSACTION_TYPES.get(self.transaction_type, self.transaction_type))
         if self.min_rooms or self.max_rooms:
             if self.min_rooms == self.max_rooms:
                 parts.append(f"{self.min_rooms}-комн.")

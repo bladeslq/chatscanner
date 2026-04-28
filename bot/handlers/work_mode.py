@@ -13,7 +13,7 @@ from bot.keyboards.menus import main_menu
 from userbot.scanner import scanner
 from ai.grok import extract_listing, check_match, check_tenant_conflict
 from ai.dadata import enrich_district  # used inside _get_listing
-from config import PROPERTY_TYPES, TRANSACTION_TYPES
+from config import PROPERTY_TYPES
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -180,7 +180,6 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
 
 def _build_notification(client, listing: dict, chat_name: str, score: int, raw_text: str) -> str:
     prop_type = PROPERTY_TYPES.get(listing.get("property_type", ""), listing.get("property_type", "—"))
-    tr_type = TRANSACTION_TYPES.get(listing.get("transaction_type", ""), listing.get("transaction_type", "—"))
 
     # Price
     price = listing.get("price")
@@ -262,7 +261,7 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
         "",
         f"📌 Чат: {chat_name}",
         "",
-        f"🏠 {tr_type} | {prop_type}",
+        f"🏠 Аренда | {prop_type}",
         f"🚪 {rooms_str}",
         f"📐 Площадь: {area_str}",
     ]

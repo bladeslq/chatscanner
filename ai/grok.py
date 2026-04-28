@@ -15,7 +15,7 @@ _groq_sem = asyncio.Semaphore(2)
 
 SYSTEM_PROMPT = """Ты — профессиональный аналитик рынка аренды квартир Казани. Извлекаешь структурированные данные из объявлений в Telegram-чатах риелторов.
 
-Ты работаешь ТОЛЬКО с квартирами и комнатами. Дома, коттеджи, таунхаусы, дачи — игнорируй (is_listing: false).
+Ты работаешь ТОЛЬКО с арендой квартир и комнат. Продажу, дома, коттеджи, таунхаусы, дачи — игнорируй (is_listing: false).
 
 ## ТИПЫ ОБЪЕКТОВ (только квартиры и комнаты)
 
@@ -78,26 +78,24 @@ SYSTEM_PROMPT = """Ты — профессиональный аналитик р
 
 ## ПРАВИЛА ИЗВЛЕЧЕНИЯ
 
-1. Тип сделки: в риелторских чатах по умолчанию аренда (rent). Продажа — только если явно указано.
-2. Площадь: "60кв" / "60м" / "60м²" / "60 метров" / "60 кв.м" → area=60
-3. Цена: только число в рублях. "35" в контексте аренды → 35000. "35т" / "35к" / "35тыс" → 35000.
-4. Залог в %: пересчитай в рубли от основной цены аренды.
-5. Этаж: "3/9" → floor=3, floors_total=9. "3 из 9" — то же самое.
-6. ЖК: названия пишут без "ЖК" — отдельной строкой или после типа квартиры. Если видишь похожее на название ЖК — запиши в complex.
-7. Контакт: извлеки имя + телефон или @ник. Если несколько — все через запятую.
-8. Дом/коттедж/таунхаус/дача/участок → is_listing=false, не извлекай.
-9. Если поле не упоминается — верни null.
-10. Верни ТОЛЬКО JSON без пояснений и markdown-блоков."""
+1. Площадь: "60кв" / "60м" / "60м²" / "60 метров" / "60 кв.м" → area=60
+2. Цена: только число в рублях. "35" в контексте аренды → 35000. "35т" / "35к" / "35тыс" → 35000.
+3. Залог в %: пересчитай в рубли от основной цены аренды.
+4. Этаж: "3/9" → floor=3, floors_total=9. "3 из 9" — то же самое.
+5. ЖК: названия пишут без "ЖК" — отдельной строкой или после типа квартиры. Если видишь похожее на название ЖК — запиши в complex.
+6. Контакт: извлеки имя + телефон или @ник. Если несколько — все через запятую.
+7. Дом/коттедж/таунхаус/дача/участок/продажа → is_listing=false, не извлекай.
+8. Если поле не упоминается — верни null.
+9. Верни ТОЛЬКО JSON без пояснений и markdown-блоков."""
 
 EXTRACTION_PROMPT = """Проанализируй сообщение из Telegram-чата риелторов Казани.
 
-Если это НЕ объявление о квартире или комнате — верни: {"is_listing": false}
-Сюда относятся: дома, коттеджи, таунхаусы, дачи, участки, коммерция, вопросы, обсуждения.
+Если это НЕ объявление об АРЕНДЕ квартиры или комнаты — верни: {"is_listing": false}
+Сюда относятся: продажа, дома, коттеджи, таунхаусы, дачи, участки, коммерция, вопросы, обсуждения.
 
-Если это объявление о квартире или комнате — верни JSON строго в таком формате (без markdown):
+Если это объявление об аренде квартиры или комнаты — верни JSON строго в таком формате (без markdown):
 {
   "is_listing": true,
-  "transaction_type": "rent" | "sale",
   "property_type": "apartment" | "room",
   "rooms": число или null,
   "euro_format": true | false,
@@ -250,12 +248,6 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
     score = 0
     total_criteria = 0
 
-    # transaction type
-    if client_obj.transaction_type:
-        total_criteria += 20
-        if listing.get("transaction_type") == client_obj.transaction_type:
-            score += 20
-
     # property type — hard filter
     if client_obj.property_type:
         total_criteria += 20
@@ -307,18 +299,19 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
                 return False, 0
             score += 15
 
-    # district — hard filter: unknown district passes through
+    # district — strict hard filter. Unknown district is normalized to "Пригород"
+    # by enrich_district(), so listing.district is always set when is_listing=true.
+    # Client with no districts selected = "Все районы" = passes everything.
     if client_obj.districts:
         total_criteria += 10
-        district = listing.get("district", "")
-        if district:
-            matched = any(
-                d.lower() in district.lower() or district.lower() in d.lower()
-                for d in client_obj.districts
-            )
-            if not matched:
-                return False, 0
-            score += 10
+        district = listing.get("district") or "Пригород"
+        matched = any(
+            d.lower() in district.lower() or district.lower() in d.lower()
+            for d in client_obj.districts
+        )
+        if not matched:
+            return False, 0
+        score += 10
 
     if total_criteria == 0:
         return True, 50

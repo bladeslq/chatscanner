@@ -171,9 +171,14 @@ async def enrich_district(listing: dict) -> dict:
         if district:
             logger.info(f"DaData resolved district by address '{address}': {district}")
 
-    if district:
-        listing = {**listing, "district": district}
-    else:
-        logger.debug(f"Could not resolve district, keeping Grok's: {listing.get('district')}")
+    if not district:
+        grok_match = _match_district(listing.get("district"))
+        if grok_match:
+            district = grok_match
 
+    if not district:
+        district = "Пригород"
+        logger.debug(f"District not resolved (complex='{complex_name}', address='{address}') → Пригород")
+
+    listing = {**listing, "district": district}
     return listing

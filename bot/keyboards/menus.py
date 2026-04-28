@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from config import PROPERTY_TYPES, TRANSACTION_TYPES
+from config import PROPERTY_TYPES
 
 
 def bottom_menu(is_working: bool) -> ReplyKeyboardMarkup:
@@ -59,15 +59,6 @@ def client_actions(client_id: int) -> InlineKeyboardMarkup:
     kb.button(text="К списку клиентов", callback_data="clients_menu")
     kb.button(text="Удалить", callback_data=f"client_delete:{client_id}")
     kb.adjust(2, 1, 1)
-    return kb.as_markup()
-
-
-def transaction_type_kb() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    for k, v in TRANSACTION_TYPES.items():
-        kb.button(text=v, callback_data=f"tr_type:{k}")
-    kb.button(text="Любой", callback_data="tr_type:any")
-    kb.adjust(2)
     return kb.as_markup()
 
 

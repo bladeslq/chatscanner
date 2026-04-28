@@ -409,14 +409,10 @@ KAZAN_DISTRICTS = [
     "Ново-Савиновский",
     "Приволжский",
     "Советский",
+    "Пригород",
 ]
 
 PROPERTY_TYPES = {
     "apartment": "Квартира",
     "house": "Дом/Коттедж",
-}
-
-TRANSACTION_TYPES = {
-    "sale": "Продажа",
-    "rent": "Аренда",
 }

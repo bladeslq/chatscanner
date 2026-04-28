@@ -10,7 +10,7 @@ from bot.keyboards.menus import (
     clients_menu, client_actions,
     districts_kb, skip_kb, back_kb, confirm_kb,
 )
-from config import PROPERTY_TYPES, TRANSACTION_TYPES, KAZAN_DISTRICTS
+from config import PROPERTY_TYPES, KAZAN_DISTRICTS
 
 router = Router()
 
