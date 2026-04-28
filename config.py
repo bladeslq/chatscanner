@@ -13,7 +13,7 @@ DADATA_SECRET_KEY: str = os.getenv("DADATA_SECRET_KEY", "")
 
 DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///chatscanner.db")
 GROK_BASE_URL: str = "https://api.groq.com/openai/v1"
-GROK_MODEL: str = "llama-3.3-70b-versatile"
+GROK_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 # Local ЖК → district dictionary. Takes priority over DaData.
 # Keys are lowercase, partial matches work (see dadata.py).
