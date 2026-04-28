@@ -355,17 +355,17 @@ def check_match(listing: dict, client_obj: Client) -> tuple[bool, int]:
             return False, 0
         score += 20
 
-    # area — strict hard filter with 10% tolerance. Missing area = reject.
+    # area — soft filter with 10% tolerance. Missing area passes through —
+    # площадь редко указывают точно, и клиенты обычно не выставляют её строго.
     if client_obj.min_area or client_obj.max_area:
         total_criteria += 15
         area = listing.get("area")
-        if area is None:
-            return False, 0
-        if client_obj.min_area and area < client_obj.min_area * 0.9:
-            return False, 0
-        if client_obj.max_area and area > client_obj.max_area * 1.1:
-            return False, 0
-        score += 15
+        if area is not None:
+            if client_obj.min_area and area < client_obj.min_area * 0.9:
+                return False, 0
+            if client_obj.max_area and area > client_obj.max_area * 1.1:
+                return False, 0
+            score += 15
 
     # district — strict hard filter. Unknown district is normalized to "Пригород"
     # by enrich_district(), so listing.district is always set when is_listing=true.
