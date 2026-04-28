@@ -12,7 +12,7 @@ returns nothing.
 import logging
 import aiohttp
 from difflib import SequenceMatcher
-from config import DADATA_API_KEY, DADATA_SECRET_KEY, KAZAN_DISTRICTS, KAZAN_COMPLEXES
+from config import DADATA_API_KEY, DADATA_SECRET_KEY, KAZAN_DISTRICTS, KAZAN_COMPLEXES, KAZAN_STREETS
 
 FUZZY_THRESHOLD = 0.65  # min similarity ratio to accept a match
 
@@ -99,6 +99,7 @@ async def _clean_district(address: str) -> str | None:
                     return None
                 data = await resp.json()
                 if not data:
+                    logger.info(f"DaData clean returned empty list for '{address}'")
                     return None
                 raw = data[0].get("city_district")
                 matched = _match_district(raw)
@@ -108,6 +109,20 @@ async def _clean_district(address: str) -> str | None:
     except Exception as e:
         logger.warning(f"DaData clean error: {e}")
         return None
+
+
+def _lookup_street(address: str) -> str | None:
+    """Match address against the local KAZAN_STREETS dictionary.
+    Picks the longest matching key — so 'академика сахарова' beats 'сахарова'.
+    """
+    addr = address.lower()
+    best_key = None
+    best_len = 0
+    for key in KAZAN_STREETS:
+        if key in addr and len(key) > best_len:
+            best_key = key
+            best_len = len(key)
+    return KAZAN_STREETS[best_key] if best_key else None
 
 
 def _lookup_local(complex_name: str) -> str | None:
@@ -161,10 +176,12 @@ def _lookup_local(complex_name: str) -> str | None:
 async def enrich_district(listing: dict) -> dict:
     """
     Resolve district with priority:
-    1. Local KAZAN_COMPLEXES dict (exact/partial match on ЖК name)
-    2. DaData suggest (by ЖК name)
-    3. DaData clean (by street address)
-    4. Grok's own guess — kept as-is
+    1. Local KAZAN_COMPLEXES dict (by ЖК name)
+    2. DaData suggest API (by ЖК name)
+    3. Local KAZAN_STREETS dict (by street address) — fast & doesn't need DaData
+    4. DaData clean API (by street address)
+    5. Grok's own guess — kept as-is
+    6. Fallback: "Пригород"
     """
     complex_name = listing.get("complex")
     address = listing.get("address")
@@ -179,6 +196,11 @@ async def enrich_district(listing: dict) -> dict:
         district = await _suggest_district(f"ЖК {complex_name} Казань")
         if district:
             logger.info(f"DaData resolved district by ЖК '{complex_name}': {district}")
+
+    if not district and address:
+        district = _lookup_street(address)
+        if district:
+            logger.info(f"Local dict resolved district by street '{address}': {district}")
 
     if not district and address:
         district = await _clean_district(address)
