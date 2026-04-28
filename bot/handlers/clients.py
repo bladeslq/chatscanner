@@ -10,6 +10,7 @@ from bot.keyboards.menus import (
     clients_menu, client_actions,
     districts_kb, skip_kb, back_kb, confirm_kb,
 )
+from bot.utils import build_contacts_line
 from config import PROPERTY_TYPES, KAZAN_DISTRICTS
 
 router = Router()
@@ -163,11 +164,15 @@ async def cb_match_reject(call: CallbackQuery):
 
 def _build_match_card(match, page: int, total: int) -> str:
     dt = match.sent_at.strftime("%d.%m %H:%M") if match.sent_at else ""
+    body = match.message_text[:800] if match.message_text else "—"
     lines = [
         f"<b>{page + 1}/{total}</b>  ·  {match.chat_name}  ·  {dt}",
         "",
-        f"<code>{match.message_text[:800] if match.message_text else '—'}</code>",
+        f"<code>{body}</code>",
     ]
+    contacts = build_contacts_line(match.message_text or "")
+    if contacts:
+        lines += ["", contacts]
     return "\n".join(lines)
 
 
