@@ -28,7 +28,13 @@ _groq_sem = asyncio.Semaphore(2)
 # until this timestamp passes. Set after exhausting 429 retries.
 # Messages received during the pause are dropped — once the API recovers,
 # only NEW messages are processed.
+#
+# Pause grows exponentially on consecutive 429s: 30s → 60s → 120s → … → 300s.
+# Resets to base after the next successful request.
 _paused_until: float = 0.0
+_PAUSE_BASE = 30.0
+_PAUSE_MAX = 300.0
+_next_pause: float = _PAUSE_BASE
 
 
 def is_paused() -> bool:
@@ -36,12 +42,20 @@ def is_paused() -> bool:
     return loop.time() < _paused_until
 
 
-def _set_pause(seconds: float):
-    global _paused_until
+def _trigger_pause():
+    """Activate pause and double the next one (capped at _PAUSE_MAX)."""
+    global _paused_until, _next_pause
     loop = asyncio.get_event_loop()
-    target = loop.time() + seconds
-    if target > _paused_until:
-        _paused_until = target
+    duration = _next_pause
+    _paused_until = loop.time() + duration
+    _next_pause = min(_next_pause * 2, _PAUSE_MAX)
+    return duration
+
+
+def _reset_pause():
+    """Called after a successful request — restore base pause for next 429."""
+    global _next_pause
+    _next_pause = _PAUSE_BASE
 
 SYSTEM_PROMPT = """Ты — профессиональный аналитик рынка аренды квартир Казани. Извлекаешь структурированные данные из объявлений в Telegram-чатах риелторов.
 
@@ -178,6 +192,7 @@ async def _groq_request(messages: list, max_tokens: int, temperature: float = 0.
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
+                _reset_pause()
                 return response.choices[0].message.content.strip()
             except Exception as e:
                 msg = str(e)
@@ -185,13 +200,14 @@ async def _groq_request(messages: list, max_tokens: int, temperature: float = 0.
                     if attempt < 2:
                         await asyncio.sleep(2 ** attempt * 3)  # 3s, 6s
                         continue
-                    _set_pause(30.0)
-                    logger.warning("Groq 429 — pausing extraction for 30s")
+                    duration = _trigger_pause()
+                    logger.warning(f"Groq 429 — pausing extraction for {duration:.0f}s")
                     return None
                 if attempt < 2:
                     await asyncio.sleep(2 ** attempt * 2)
                     continue
-                logger.warning(f"Groq transient error after retries: {e}")
+                duration = _trigger_pause()
+                logger.warning(f"Groq transient error — pausing {duration:.0f}s: {e}")
                 return None
     return None
 
