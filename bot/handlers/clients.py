@@ -1,4 +1,5 @@
 """Client management: add, view, edit, delete clients with their requirements."""
+import html
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -164,9 +165,11 @@ async def cb_match_reject(call: CallbackQuery):
 
 def _build_match_card(match, page: int, total: int) -> str:
     dt = match.sent_at.strftime("%d.%m %H:%M") if match.sent_at else ""
-    body = match.message_text[:800] if match.message_text else "—"
+    raw_body = match.message_text[:800] if match.message_text else "—"
+    chat_name = html.escape(match.chat_name or "")
+    body = html.escape(raw_body)
     lines = [
-        f"<b>{page + 1}/{total}</b>  ·  {match.chat_name}  ·  {dt}",
+        f"<b>{page + 1}/{total}</b>  ·  {chat_name}  ·  {dt}",
         "",
         f"<code>{body}</code>",
     ]
