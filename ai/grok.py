@@ -20,8 +20,10 @@ client = AsyncOpenAI(
     max_retries=0,
 )
 
-# Global semaphore — max 2 concurrent Groq requests across all users
-_groq_sem = asyncio.Semaphore(2)
+# Global semaphore — serialize Groq calls. Free tier is 30 RPM; with parallel
+# bursts we'd cross the limit and get 429. One in flight + our backoff keeps
+# us well under.
+_groq_sem = asyncio.Semaphore(1)
 
 
 # Global pause flag: when set, all callers skip Groq cheaply (return None)
@@ -32,7 +34,7 @@ _groq_sem = asyncio.Semaphore(2)
 # Pause grows exponentially on consecutive 429s: 30s → 60s → 120s → … → 300s.
 # Resets to base after the next successful request.
 _paused_until: float = 0.0
-_PAUSE_BASE = 30.0
+_PAUSE_BASE = 60.0  # Groq's 429 window is typically ~60s on free tier
 _PAUSE_MAX = 300.0
 _next_pause: float = _PAUSE_BASE
 

@@ -1,6 +1,8 @@
 """Work mode toggle and the core scanning/matching logic."""
+import hashlib
 import logging
 import asyncio
+import re
 import time
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
@@ -21,28 +23,46 @@ logger = logging.getLogger(__name__)
 # Global bot reference set from main.py
 _bot: Bot = None
 
-# Cache: (chat_id, message_id) → {listing, ts}
-# Prevents parsing the same message multiple times when several users monitor the same chat
-_listing_cache: dict[tuple, dict] = {}
-_listing_locks: dict[tuple, asyncio.Lock] = {}
-_CACHE_TTL = 300  # 5 minutes
+# Cache by content hash: same text reposted to N chats = 1 Groq call.
+# Was previously keyed by (chat_id, message_id), so identical reposts to
+# different chats hit Groq N times — main driver of 429s.
+_listing_cache: dict[str, dict] = {}
+_listing_locks: dict[str, asyncio.Lock] = {}
+_CACHE_TTL = 1800  # 30 minutes — listings are reposted across chats over hours
+
+# Local pre-filter: messages obviously not rentals — skip Groq entirely.
+# Drops ~10–20% of traffic before any API call.
+_SKIP_RE = re.compile(
+    r"\b(продаж[аеу]|продаётс?я|продам|куп[лию]|покупк[аеу]|"
+    r"коттедж|таунхаус|дач[аеу]|участок|участки|"
+    r"коммерческ|нежилое|офис[ыа]?|склад|магазин|"
+    r"ищу\s+(?:квартир|комнат|сним))",
+    re.IGNORECASE,
+)
 
 
-async def _get_listing(chat_id: int, message_id: int, text: str) -> dict:
-    key = (chat_id, message_id)
+def _content_key(text: str) -> str:
+    # Normalize: collapse whitespace, lowercase. Forwards/edits with cosmetic
+    # changes still hash to the same key.
+    norm = re.sub(r"\s+", " ", text).strip().lower()
+    return hashlib.md5(norm.encode("utf-8")).hexdigest()
 
-    # Fast path — already cached
+
+async def _get_listing(text: str) -> dict:
+    if _SKIP_RE.search(text):
+        return {"is_listing": False}
+
+    key = _content_key(text)
+
     cached = _listing_cache.get(key)
     if cached and time.monotonic() - cached["ts"] < _CACHE_TTL:
         return cached["listing"]
 
-    # Get or create a lock for this specific message
     if key not in _listing_locks:
         _listing_locks[key] = asyncio.Lock()
     lock = _listing_locks[key]
 
     async with lock:
-        # Double-check after acquiring lock (another coroutine may have just filled it)
         cached = _listing_cache.get(key)
         if cached and time.monotonic() - cached["ts"] < _CACHE_TTL:
             return cached["listing"]
@@ -53,7 +73,6 @@ async def _get_listing(chat_id: int, message_id: int, text: str) -> dict:
 
         _listing_cache[key] = {"listing": listing, "ts": time.monotonic()}
 
-        # Cleanup stale entries to avoid memory leak
         now = time.monotonic()
         stale = [k for k, v in _listing_cache.items() if now - v["ts"] > _CACHE_TTL]
         for k in stale:
@@ -137,8 +156,8 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
 
     logger.info(f"📨 Сообщение из [{chat_name}]: {text[:100]}")
 
-    # Parse once per (chat_id, message_id) — cached for all users monitoring the same chat
-    listing = await _get_listing(chat_id, message.id, text)
+    # Parse once per content hash — same text reposted across chats hits Groq once
+    listing = await _get_listing(text)
     logger.info(f"🤖 Groq ответ: is_listing={listing.get('is_listing')} type={listing.get('property_type')} price={listing.get('price')}")
     if not listing.get("is_listing"):
         return
