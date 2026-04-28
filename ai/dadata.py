@@ -59,6 +59,9 @@ def _match_district(raw: str | None) -> str | None:
 
 async def _suggest_district(query: str) -> str | None:
     """Use DaData suggest API — good for ЖК names."""
+    if not DADATA_API_KEY:
+        logger.warning("DADATA_API_KEY is empty — skipping suggest call")
+        return None
     payload = {
         "query": query,
         "count": 1,
@@ -68,6 +71,8 @@ async def _suggest_district(query: str) -> str | None:
         async with aiohttp.ClientSession() as session:
             async with session.post(_SUGGEST_URL, json=payload, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status != 200:
+                    body = await resp.text()
+                    logger.warning(f"DaData suggest HTTP {resp.status}: {body[:200]}")
                     return None
                 data = await resp.json()
                 suggestions = data.get("suggestions", [])
@@ -81,16 +86,25 @@ async def _suggest_district(query: str) -> str | None:
 
 async def _clean_district(address: str) -> str | None:
     """Use DaData clean API — good for street addresses."""
+    if not DADATA_API_KEY:
+        logger.warning("DADATA_API_KEY is empty — skipping clean call")
+        return None
     payload = [f"Казань, {address}"]
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(_CLEAN_URL, json=payload, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status != 200:
+                    body = await resp.text()
+                    logger.warning(f"DaData clean HTTP {resp.status}: {body[:200]}")
                     return None
                 data = await resp.json()
                 if not data:
                     return None
-                return _match_district(data[0].get("city_district"))
+                raw = data[0].get("city_district")
+                matched = _match_district(raw)
+                if not matched:
+                    logger.info(f"DaData clean got city_district={raw!r}, no match in KAZAN_DISTRICTS")
+                return matched
     except Exception as e:
         logger.warning(f"DaData clean error: {e}")
         return None
@@ -170,15 +184,21 @@ async def enrich_district(listing: dict) -> dict:
         district = await _clean_district(address)
         if district:
             logger.info(f"DaData resolved district by address '{address}': {district}")
+        else:
+            logger.info(f"DaData clean returned no district for address '{address}'")
 
     if not district:
         grok_match = _match_district(listing.get("district"))
         if grok_match:
             district = grok_match
+            logger.info(f"Grok district guess accepted: {district}")
 
     if not district:
         district = "Пригород"
-        logger.debug(f"District not resolved (complex='{complex_name}', address='{address}') → Пригород")
+        logger.info(
+            f"District not resolved → Пригород "
+            f"(complex={complex_name!r}, address={address!r}, grok_guess={listing.get('district')!r})"
+        )
 
     listing = {**listing, "district": district}
     return listing
