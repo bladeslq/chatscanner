@@ -156,11 +156,9 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
 
         # second LLM call: tenant conflict check (only when both sides have data)
         if listing.get("tenant_requirements") and client.notes:
-            logger.info(f"🔍 Проверка конфликта: требования='{listing['tenant_requirements']}' заметки='{client.notes}'")
             conflict = await check_tenant_conflict(listing["tenant_requirements"], client.notes)
-            logger.info(f"🔍 Результат конфликта для {client.name}: {'ДА' if conflict else 'НЕТ'}")
             if conflict:
-                logger.info(f"🚫 Конфликт требований для клиента {client.name}, пропускаем")
+                logger.info(f"🚫 Конфликт для {client.name}: '{listing['tenant_requirements']}' ≠ '{client.notes}'")
                 continue
 
         if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
