@@ -190,7 +190,7 @@ def _match_nav_kb(client_id: int, match_id: int, page: int, total: int):
     if nav:
         kb.row(*nav)
     kb.row(
-        InlineKeyboardButton(text="🗑 Снять", callback_data=f"match_reject:{client_id}:{match_id}:{page}"),
+        InlineKeyboardButton(text="Удалить объект", callback_data=f"match_reject:{client_id}:{match_id}:{page}"),
     )
     kb.row(InlineKeyboardButton(text="Вернуться к клиенту", callback_data=f"client_view:{client_id}"))
     return kb.as_markup()
