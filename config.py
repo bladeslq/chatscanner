@@ -29,8 +29,9 @@ YANDEX_GEOCODER_KEY: str = os.getenv("YANDEX_GEOCODER_KEY", "")  # not used: fre
 
 
 # ── Districts ──────────────────────────────────────────────────────
-# 7 city districts of Kazan + 4 suburb districts (where realtors actually post)
-# + "Пригород" as a catch-all for whatever else lands in the suburbs.
+# 7 city districts of Kazan + 4 suburb districts (where realtors actually post).
+# No catch-all "Пригород" — every listing resolves to a concrete district or
+# stays unknown (and is filtered out for clients with district restrictions).
 KAZAN_CITY_DISTRICTS = [
     "Авиастроительный",
     "Вахитовский",
@@ -46,7 +47,7 @@ KAZAN_SUBURB_DISTRICTS = [
     "Зеленодольский",     # Новая Тура, Осиново, Айша
     "Высокогорский",      # Высокая Гора, Шапши
 ]
-KAZAN_DISTRICTS = KAZAN_CITY_DISTRICTS + KAZAN_SUBURB_DISTRICTS + ["Пригород"]
+KAZAN_DISTRICTS = KAZAN_CITY_DISTRICTS + KAZAN_SUBURB_DISTRICTS
 
 
 PROPERTY_TYPES = {
