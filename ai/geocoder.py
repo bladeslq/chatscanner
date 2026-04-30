@@ -312,8 +312,12 @@ async def resolve_district(listing: dict) -> dict:
             })
             return out
 
-    # Step 4: 2GIS Geocoder by address
-    if addr:
+    # Step 4: 2GIS Geocoder by address — ONLY when there's a house number.
+    # For street-without-house, skip directly to street_buildings (Step 5),
+    # which probes multiple buildings and detects multi-district via bbox.
+    # Otherwise Geocoder might return a single random house's district and
+    # mask the fact that the street crosses several districts.
+    if addr and _has_house_number(addr):
         d = await dgis_geocoder(addr)
         if d:
             out.update({
@@ -324,7 +328,7 @@ async def resolve_district(listing: dict) -> dict:
             })
             return out
 
-    # Step 5: 2GIS street_buildings (street without house)
+    # Step 5: 2GIS street_buildings (street without house — sample buildings)
     if addr and not _has_house_number(addr):
         districts, low_conf = await dgis_street_districts(addr)
         if districts:
