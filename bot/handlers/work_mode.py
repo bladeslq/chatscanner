@@ -1,4 +1,13 @@
-"""Work mode toggle and the core scanning/matching logic."""
+"""Work mode toggle and the core scanning/matching logic.
+
+Pipeline (v4 architecture):
+  1. Pre-filter regex (drop obvious non-rentals)
+  2. Haiku 4.5 extraction with content-hash cache
+  3. Geocoder cascade (LLM hint → 2GIS Places → Geocoder → street_buildings)
+  4. Hard filters (type/rooms/price/district with multi-district intersection)
+  5. Semantic Haiku match (covers tenant restrictions + ЖК priorities + freeform)
+  6. Save match (with multi-district flag for UI annotation)
+"""
 import hashlib
 import logging
 import asyncio
@@ -13,25 +22,21 @@ from database.db import (
 )
 from bot.keyboards.menus import main_menu
 from userbot.scanner import scanner
-from ai.grok import extract_listing, check_match, check_tenant_conflict
-from ai.dadata import enrich_district  # used inside _get_listing
+from ai.extractor import extract_listing
+from ai.geocoder import resolve_district
+from ai.matcher import hard_filters, semantic_match
 from config import PROPERTY_TYPES
 
 router = Router()
 logger = logging.getLogger(__name__)
 
-# Global bot reference set from main.py
 _bot: Bot = None
 
-# Cache by content hash: same text reposted to N chats = 1 Groq call.
-# Was previously keyed by (chat_id, message_id), so identical reposts to
-# different chats hit Groq N times — main driver of 429s.
+# Cache by content hash: same text reposted to N chats = 1 LLM call.
 _listing_cache: dict[str, dict] = {}
 _listing_locks: dict[str, asyncio.Lock] = {}
-_CACHE_TTL = 1800  # 30 minutes — listings are reposted across chats over hours
+_CACHE_TTL = 1800  # 30 minutes
 
-# Local pre-filter: messages obviously not rentals — skip Groq entirely.
-# Drops ~10–20% of traffic before any API call.
 _SKIP_RE = re.compile(
     r"\b(продаж[аеу]|продаётс?я|продам|куп[лию]|покупк[аеу]|"
     r"коттедж|таунхаус|дач[аеу]|участок|участки|"
@@ -42,13 +47,12 @@ _SKIP_RE = re.compile(
 
 
 def _content_key(text: str) -> str:
-    # Normalize: collapse whitespace, lowercase. Forwards/edits with cosmetic
-    # changes still hash to the same key.
     norm = re.sub(r"\s+", " ", text).strip().lower()
     return hashlib.md5(norm.encode("utf-8")).hexdigest()
 
 
 async def _get_listing(text: str) -> dict:
+    """Extract + geocode once per unique text, cached for 30min."""
     if _SKIP_RE.search(text):
         return {"is_listing": False}
 
@@ -69,10 +73,11 @@ async def _get_listing(text: str) -> dict:
 
         listing = await extract_listing(text)
         if listing.get("is_listing"):
-            listing = await enrich_district(listing)
+            listing = await resolve_district(listing)
 
         _listing_cache[key] = {"listing": listing, "ts": time.monotonic()}
 
+        # Lazy GC of stale entries
         now = time.monotonic()
         stale = [k for k, v in _listing_cache.items() if now - v["ts"] > _CACHE_TTL]
         for k in stale:
@@ -137,7 +142,7 @@ async def _start_monitoring(telegram_id: int):
     logger.info(f"Started monitoring {len(chat_ids)} chats for user {telegram_id}")
 
 
-# ── Message Processing (called by scanner) ───────────────────────────
+# ── Message Processing ─────────────────────────────────────────────
 
 async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, event):
     """Called by the userbot scanner for each new message in monitored chats."""
@@ -152,36 +157,38 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
     message = event.message
     text = message.text or message.caption or ""
     if len(text.strip()) < 30:
-        return  # too short to be a listing
+        return
 
-    logger.info(f"📨 Сообщение из [{chat_name}]: {text[:100]}")
+    logger.info(f"📨 [{chat_name}]: {text[:100]}")
 
-    # Parse once per content hash — same text reposted across chats hits Groq once
     listing = await _get_listing(text)
-    logger.info(f"🤖 Groq ответ: is_listing={listing.get('is_listing')} type={listing.get('property_type')} price={listing.get('price')}")
+    logger.info(
+        f"🤖 Haiku: is_listing={listing.get('is_listing')} type={listing.get('property_type')} "
+        f"price={listing.get('price')}"
+    )
     if not listing.get("is_listing"):
         return
 
-    logger.info(f"📍 Район итого: {listing.get('district')} (ЖК: {listing.get('complex')})")
+    src = listing.get("district_source") or "—"
+    multi_tag = " [MULTI]" if listing.get("district_multi") else ""
+    logger.info(
+        f"📍 Район: {listing.get('district')}{multi_tag} (via={src}, ЖК={listing.get('complex')})"
+    )
 
-    logger.info(f"✅ Объект найден в [{chat_name}]: {listing.get('property_type')} {listing.get('price')}")
-
-    # Check against each active client
     clients = await get_clients(user.id, active_only=True)
     for client in clients:
-        matches, score = check_match(listing, client)
-        if not matches:
+        passes, reason, score = hard_filters(listing, client)
+        if not passes:
+            logger.debug(f"  ❌ {client.name}: {reason}")
             continue
 
-        # second LLM call: tenant conflict check (only when both sides have data)
-        if listing.get("tenant_requirements") and client.notes:
-            conflict = await check_tenant_conflict(listing["tenant_requirements"], client.notes)
-            if conflict:
-                logger.info(f"🚫 Конфликт для {client.name}: '{listing['tenant_requirements']}' ≠ '{client.notes}'")
-                continue
+        sem_result = await semantic_match(listing, text, client)
+        if not sem_result.get("matches"):
+            logger.info(f"  🚫 {client.name}: {sem_result.get('reason')}")
+            continue
 
         if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
-            logger.info(f"⏭ Дубликат, пропускаем для клиента {client.name}")
+            logger.info(f"  ⏭ Дубликат для {client.name}")
             continue
 
         await save_match(
@@ -194,10 +201,13 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
             extracted_data=listing,
             match_score=score,
         )
-        logger.info(f"💾 Сохранён матч для клиента {client.name} (score={score}%)")
+        logger.info(f"  💾 Сохранён матч для {client.name} (score={score}%)")
 
+
+# ── Notification builder ────────────────────────────────────────────
 
 def _build_notification(client, listing: dict, chat_name: str, score: int, raw_text: str) -> str:
+    """Render the match card. Adds multi-district warning when applicable."""
     prop_type = PROPERTY_TYPES.get(listing.get("property_type", ""), listing.get("property_type", "—"))
 
     # Price
@@ -219,11 +229,9 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
     else:
         dep_str = None
 
-    # Area
     area = listing.get("area")
     area_str = f"{area} м²" if area else "—"
 
-    # Rooms
     rooms = listing.get("rooms")
     euro = listing.get("euro_format")
     prop_t = listing.get("property_type")
@@ -234,7 +242,6 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
     else:
         rooms_str = "—"
 
-    # Floor
     floor = listing.get("floor")
     floors_total = listing.get("floors_total")
     if floor and floors_total:
@@ -244,29 +251,22 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
     else:
         floor_str = None
 
-    # Location
     district = listing.get("district") or "—"
     address = listing.get("address") or "—"
     complex_name = listing.get("complex")
 
-    # Owner / keys
     owner_type = listing.get("owner_type")
     owner_str = "Собственник" if owner_type == "owner" else ("Агент" if owner_type == "agent" else None)
     has_keys = listing.get("has_keys")
 
-    # Condition
     condition = listing.get("condition")
     building_type = listing.get("building_type")
-
-    # Available until
     available_until = listing.get("available_until")
 
-    # Commission / kickback
     commission_percent = listing.get("commission_percent")
     kickback_percent = listing.get("kickback_percent")
     commission_shared = listing.get("commission_shared")
 
-    # Tenant requirements
     tenant_req = listing.get("tenant_requirements")
 
     contact = listing.get("contact") or "—"
@@ -290,7 +290,6 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
     if dep_str:
         lines.append(f"🔒 Залог: {dep_str}")
 
-    # Commission line
     comm_parts = []
     if commission_percent is not None:
         comm_parts.append(f"комиссия {commission_percent}%")
@@ -301,14 +300,20 @@ def _build_notification(client, listing: dict, chat_name: str, score: int, raw_t
     if comm_parts:
         lines.append(f"💼 {', '.join(comm_parts)}")
 
-    lines += [
-        f"🗺 Район: {district}",
-        f"📍 Адрес: {address}",
-    ]
+    lines.append(f"🗺 Район: {district}")
+    # Multi-district annotation: "осторожнее, улица идёт через X и Y"
+    if listing.get("district_multi"):
+        all_districts = listing.get("districts_all") or []
+        if len(all_districts) > 1:
+            joined = " и ".join(all_districts)
+            lines.append(f"⚠️ <i>Осторожнее: улица идёт через районы {joined}, дом не указан — уточни у владельца</i>")
+        else:
+            lines.append("⚠️ <i>Район определён по нескольким зданиям, возможна погрешность — уточни у владельца</i>")
+
+    lines.append(f"📍 Адрес: {address}")
     if complex_name:
         lines.append(f"🏢 ЖК: {complex_name}")
 
-    # Object details line
     details = []
     if owner_str:
         details.append(owner_str)

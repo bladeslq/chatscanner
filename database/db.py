@@ -142,10 +142,37 @@ def _message_hash(text: str) -> str:
     return hashlib.md5(text.strip().lower().encode()).hexdigest()
 
 
+_FP_PUNCT_RE = __import__("re").compile(r"[.,/\s]+")
+
+
+def _norm_fp_str(s) -> str:
+    """Normalize address/complex for fingerprint: lowercase, collapse punctuation/spaces."""
+    if not s:
+        return ""
+    s = str(s).lower().replace("ё", "е")
+    s = _FP_PUNCT_RE.sub(" ", s).strip()
+    # strip street-prefix words that shouldn't change identity
+    for prefix in ("улица ", "ул ", "проспект ", "пр-кт ", "пр ", "переулок ", "пер "):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s
+
+
 def _listing_fingerprint(listing: dict) -> str:
-    parts = "|".join(str(listing.get(f) or "") for f in (
-        "price", "rooms", "floor", "complex", "address"
-    ))
+    """Stable fingerprint to detect the same apartment posted across chats with
+    different wording. Bucket price to nearest 1k so '40000' and '40500' merge,
+    but '40000' and '50000' remain distinct (those are different listings)."""
+    addr = _norm_fp_str(listing.get("address"))
+    cmplx = _norm_fp_str(listing.get("complex"))
+    rooms = listing.get("rooms") or ""
+    floor = listing.get("floor") or ""
+    price = listing.get("price") or 0
+    try:
+        price_bucket = (int(price) // 1000) * 1000
+    except (TypeError, ValueError):
+        price_bucket = 0
+    parts = f"{addr}|{cmplx}|{rooms}|{floor}|{price_bucket}"
     return hashlib.md5(parts.encode()).hexdigest()
 
 

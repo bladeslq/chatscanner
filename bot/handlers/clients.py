@@ -190,8 +190,7 @@ def _match_nav_kb(client_id: int, match_id: int, page: int, total: int):
     if nav:
         kb.row(*nav)
     kb.row(
-        InlineKeyboardButton(text="Подошла", callback_data="noop"),
-        InlineKeyboardButton(text="Не подошла", callback_data=f"match_reject:{client_id}:{match_id}:{page}"),
+        InlineKeyboardButton(text="🗑 Снять", callback_data=f"match_reject:{client_id}:{match_id}:{page}"),
     )
     kb.row(InlineKeyboardButton(text="Вернуться к клиенту", callback_data=f"client_view:{client_id}"))
     return kb.as_markup()
@@ -311,11 +310,33 @@ async def cb_edit_field(call: CallbackQuery, state: FSMContext):
         await state.set_state(ClientEdit.editing_value)
         back_kb = InlineKeyboardBuilder()
         back_kb.button(text="Назад", callback_data="edit_back_fields")
+        if field == "notes":
+            prompt_text = (
+                "📝 <b>Заметки о клиенте</b>\n\n"
+                "Опиши <b>портрет человека</b>: с детьми / без, с животными, "
+                "иностранец / гражданин РФ, возраст, профессия, пол, состав семьи, "
+                "пожелания по жильцам.\n\n"
+                "<i>⚠️ Только про человека. Район и ЖК — это отдельные поля, "
+                "их сюда не пиши, они не учитываются в заметках.</i>\n\n"
+                "Введи новое значение (или <code>-</code> чтобы очистить):"
+            )
+        else:
+            prompt_text = f"Введи новое значение для <b>{label}</b>:\n\n(или <code>-</code> чтобы очистить)"
         await call.message.edit_text(
-            f"Введи новое значение для <b>{label}</b>:\n\n(или <code>-</code> чтобы очистить)",
+            prompt_text,
             parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
+
+
+@router.callback_query(F.data.startswith("districts_page:"), ClientEdit.editing_districts)
+async def cb_edit_districts_page(call: CallbackQuery, state: FSMContext):
+    page = int(call.data.split(":")[1])
+    data = await state.get_data()
+    selected = list(data.get("selected_districts", []))
+    await state.update_data(districts_page=page)
+    await call.message.edit_reply_markup(reply_markup=_with_back(districts_kb(selected, page)))
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("district:"), ClientEdit.editing_districts)
@@ -323,11 +344,12 @@ async def cb_edit_district(call: CallbackQuery, state: FSMContext):
     val = call.data.split(":", 1)[1]
     data = await state.get_data()
     selected = list(data.get("selected_districts", []))
+    page = data.get("districts_page", 0)
 
     if val == "all":
         selected = []
         await state.update_data(selected_districts=selected)
-        await call.message.edit_reply_markup(reply_markup=_with_back(districts_kb(selected)))
+        await call.message.edit_reply_markup(reply_markup=_with_back(districts_kb(selected, page)))
     elif val == "done":
         client_id = data["edit_client_id"]
         await update_client(client_id, districts=selected if selected else None)
@@ -344,7 +366,7 @@ async def cb_edit_district(call: CallbackQuery, state: FSMContext):
         else:
             selected.append(val)
         await state.update_data(selected_districts=selected)
-        await call.message.edit_reply_markup(reply_markup=_with_back(districts_kb(selected)))
+        await call.message.edit_reply_markup(reply_markup=_with_back(districts_kb(selected, page)))
 
 
 
@@ -535,21 +557,38 @@ async def process_price_max(message: Message, state: FSMContext):
     await _next(message.bot, state, "🗺 Районы Казани (выбери один или несколько, или «Все»):", districts_kb([]))
 
 
+@router.callback_query(F.data.startswith("districts_page:"), ClientAdd.districts)
+async def process_districts_page(call: CallbackQuery, state: FSMContext):
+    page = int(call.data.split(":")[1])
+    data = await state.get_data()
+    selected = list(data.get("selected_districts", []))
+    await state.update_data(districts_page=page)
+    await call.message.edit_reply_markup(reply_markup=districts_kb(selected, page))
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("district:"), ClientAdd.districts)
 async def process_district(call: CallbackQuery, state: FSMContext):
     val = call.data.split(":", 1)[1]
     data = await state.get_data()
     selected = list(data.get("selected_districts", []))
+    page = data.get("districts_page", 0)
 
     if val == "all":
         selected = []
         await state.update_data(selected_districts=selected)
-        await call.message.edit_reply_markup(reply_markup=districts_kb(selected))
+        await call.message.edit_reply_markup(reply_markup=districts_kb(selected, page))
     elif val == "done":
         await state.update_data(districts=selected if selected else None)
         await state.set_state(ClientAdd.notes)
         await call.message.edit_text(
-            "📝 Дополнительные пожелания (или пропусти):",
+            "📝 <b>Заметки о клиенте</b>\n\n"
+            "Опиши <b>портрет человека</b>: с детьми / без, с животными, "
+            "иностранец / гражданин РФ, возраст, профессия, пол, состав семьи, "
+            "пожелания по жильцам.\n\n"
+            "<i>⚠️ Только про человека. Район и ЖК — это отдельные поля выше, "
+            "их сюда не пиши, они не учитываются в заметках.</i>",
+            parse_mode="HTML",
             reply_markup=skip_kb("skip_notes"),
         )
     else:
@@ -558,7 +597,7 @@ async def process_district(call: CallbackQuery, state: FSMContext):
         else:
             selected.append(val)
         await state.update_data(selected_districts=selected)
-        await call.message.edit_reply_markup(reply_markup=districts_kb(selected))
+        await call.message.edit_reply_markup(reply_markup=districts_kb(selected, page))
 
 
 @router.callback_query(F.data == "skip_notes", ClientAdd.notes)

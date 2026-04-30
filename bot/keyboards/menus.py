@@ -71,15 +71,38 @@ def property_type_kb() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def districts_kb(selected: list) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
+def districts_kb(selected: list, page: int = 0) -> InlineKeyboardMarkup:
+    """Paginated district picker. 8 districts per page (4 rows × 2 cols)."""
     from config import KAZAN_DISTRICTS
-    for d in KAZAN_DISTRICTS:
-        mark = "[+] " if d in selected else ""
+    PAGE_SIZE = 8
+
+    total_pages = max(1, (len(KAZAN_DISTRICTS) - 1) // PAGE_SIZE + 1)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_districts = KAZAN_DISTRICTS[start:end]
+
+    kb = InlineKeyboardBuilder()
+    for d in page_districts:
+        mark = "✅ " if d in selected else ""
         kb.button(text=f"{mark}{d}", callback_data=f"district:{d}")
-    kb.button(text="Все районы", callback_data="district:all")
-    kb.button(text="Готово", callback_data="district:done")
     kb.adjust(2)
+
+    # Pagination row
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="<", callback_data=f"districts_page:{page-1}"))
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+        if end < len(KAZAN_DISTRICTS):
+            nav.append(InlineKeyboardButton(text=">", callback_data=f"districts_page:{page+1}"))
+        kb.row(*nav)
+
+    # Bottom controls
+    kb.row(
+        InlineKeyboardButton(text="Все районы", callback_data="district:all"),
+        InlineKeyboardButton(text="Готово", callback_data="district:done"),
+    )
     return kb.as_markup()
 
 
