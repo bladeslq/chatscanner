@@ -37,6 +37,13 @@ _listing_cache: dict[str, dict] = {}
 _listing_locks: dict[str, asyncio.Lock] = {}
 _CACHE_TTL = 1800  # 30 minutes
 
+# Per-content serialization for the *full* handler (extract → match → save).
+# Repost-bots fan the same listing into N chats within milliseconds; without
+# this lock, all N invocations race past is_duplicate_match before any of
+# them commits a Match row, so the dedupe DB check finds nothing and every
+# repost saves its own copy.
+_process_locks: dict[str, asyncio.Lock] = {}
+
 _SKIP_RE = re.compile(
     r"\b(продаж[аеу]|продаётс?я|продам|куп[лию]|покупк[аеу]|"
     r"коттедж|таунхаус|дач[аеу]|участок|участки|"
@@ -83,6 +90,7 @@ async def _get_listing(text: str) -> dict:
         for k in stale:
             _listing_cache.pop(k, None)
             _listing_locks.pop(k, None)
+            _process_locks.pop(k, None)
 
     return listing
 
@@ -176,35 +184,41 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
         f"📍 Район: {listing.get('district')}{multi_tag} (via={src}, ЖК={listing.get('complex')})"
     )
 
-    clients = await get_clients(user.id, active_only=True)
-    for client in clients:
-        passes, reason, score = hard_filters(listing, client)
-        if not passes:
-            logger.debug(f"  ❌ {client.name}: {reason}")
-            continue
+    # Serialize the per-listing pipeline so concurrent reposts of the same text
+    # (different chats, same content_key) don't race past is_duplicate_match.
+    process_key = _content_key(text)
+    proc_lock = _process_locks.setdefault(process_key, asyncio.Lock())
 
-        # Dedupe BEFORE the LLM call: same listing reposted across chats must not
-        # trigger another semantic_match — that's wasted spend on a guaranteed dup.
-        if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
-            logger.info(f"  ⏭ Дубликат для {client.name}")
-            continue
+    async with proc_lock:
+        clients = await get_clients(user.id, active_only=True)
+        for client in clients:
+            passes, reason, score = hard_filters(listing, client)
+            if not passes:
+                logger.debug(f"  ❌ {client.name}: {reason}")
+                continue
 
-        sem_result = await semantic_match(listing, text, client)
-        if not sem_result.get("matches"):
-            logger.info(f"  🚫 {client.name}: {sem_result.get('reason')}")
-            continue
+            # Dedupe BEFORE the LLM call: same listing reposted across chats must not
+            # trigger another semantic_match — that's wasted spend on a guaranteed dup.
+            if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
+                logger.info(f"  ⏭ Дубликат для {client.name}")
+                continue
 
-        await save_match(
-            user_id=user.id,
-            client_id=client.id,
-            chat_id=chat_id,
-            chat_name=chat_name,
-            message_id=message.id,
-            message_text=text[:2000],
-            extracted_data=listing,
-            match_score=score,
-        )
-        logger.info(f"  💾 Сохранён матч для {client.name} (score={score}%)")
+            sem_result = await semantic_match(listing, text, client)
+            if not sem_result.get("matches"):
+                logger.info(f"  🚫 {client.name}: {sem_result.get('reason')}")
+                continue
+
+            await save_match(
+                user_id=user.id,
+                client_id=client.id,
+                chat_id=chat_id,
+                chat_name=chat_name,
+                message_id=message.id,
+                message_text=text[:2000],
+                extracted_data=listing,
+                match_score=score,
+            )
+            logger.info(f"  💾 Сохранён матч для {client.name} (score={score}%)")
 
 
 # ── Notification builder ────────────────────────────────────────────
