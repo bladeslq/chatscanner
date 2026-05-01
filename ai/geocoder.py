@@ -116,25 +116,42 @@ async def _dgis_reverse(session, lat: float, lon: float) -> str | None:
 
 async def dgis_places(complex_name: str) -> str | None:
     """Find ЖК in 2GIS catalog. If first item is the polygon (type=adm_div) without
-    district, reverse-geocode its centroid for the actual building's district."""
+    district, reverse-geocode its centroid for the actual building's district.
+
+    Two-stage query: first ask "ЖК <name>" so 2GIS narrows to residential complexes
+    (avoids matching e.g. "МЧС" → Ministry of Emergency offices). Fall back to the
+    bare name only if the prefixed query returns nothing.
+    """
     if not DGIS_API_KEY or not complex_name:
         return None
-    cache_key = f"places::{complex_name.lower().strip()}"
+    # v2: query is now "ЖК <name>" instead of bare name; old cache entries (e.g.
+    # "МЧС" → Ministry of Emergency in Vakhitovsky) must not be reused.
+    cache_key = f"places::v2::{complex_name.lower().strip()}"
     if cache_key in _cache:
         return _cache[cache_key].get("district")
 
-    async with aiohttp.ClientSession() as session:
-        data = await _dgis_get(session, "https://catalog.api.2gis.com/3.0/items", {
-            "q": complex_name,
+    async def _query(q: str):
+        return await _dgis_get(session, "https://catalog.api.2gis.com/3.0/items", {
+            "q": q,
             "location": f"{KAZAN_LON},{KAZAN_LAT}",
             "radius": KAZAN_RADIUS,
             "fields": "items.name,items.adm_div,items.point,items.type",
             "page_size": 5,
             "key": DGIS_API_KEY,
         })
-        if not data:
-            return None
-        items = data.get("result", {}).get("items", [])
+
+    name = complex_name.strip()
+    has_zhk_prefix = name.lower().startswith(("жк ", "жк."))
+
+    async with aiohttp.ClientSession() as session:
+        data = await _query(name if has_zhk_prefix else f"ЖК {name}")
+        items = (data or {}).get("result", {}).get("items", [])
+        # Fallback to bare name if "ЖК <name>" found nothing — covers complexes
+        # that 2GIS indexes without the prefix.
+        if not items and not has_zhk_prefix:
+            data = await _query(name)
+            items = (data or {}).get("result", {}).get("items", [])
+
         if not items:
             _cache[cache_key] = {"district": None}
             await _save_cache()
