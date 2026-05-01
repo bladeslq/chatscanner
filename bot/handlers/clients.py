@@ -170,9 +170,24 @@ def _build_match_card(match, page: int, total: int) -> str:
     body = html.escape(raw_body)
     lines = [
         f"<b>{page + 1}/{total}</b>  ·  {chat_name}  ·  {dt}",
-        "",
-        f"<code>{body}</code>",
     ]
+
+    data = match.extracted_data or {}
+    if data.get("district_multi"):
+        all_districts = data.get("districts_all") or []
+        if len(all_districts) > 1:
+            joined = " и ".join(html.escape(d) for d in all_districts)
+            lines += [
+                "",
+                f"⚠️ <i>Осторожнее: улица идёт через районы {joined}, дом не указан — уточни у владельца</i>",
+            ]
+        else:
+            lines += [
+                "",
+                "⚠️ <i>Район определён по нескольким зданиям, возможна погрешность — уточни у владельца</i>",
+            ]
+
+    lines += ["", f"<code>{body}</code>"]
     contacts = build_contacts_line(match.message_text or "")
     if contacts:
         lines += ["", contacts]
