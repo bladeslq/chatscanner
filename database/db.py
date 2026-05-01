@@ -219,25 +219,29 @@ async def is_duplicate_match(
             .where(Match.user_id == user_id, Match.client_id == client_id)
         )
 
+        # Existence checks: use .first() — multiple matches can satisfy any of these
+        # conditions (same fingerprint reposted N times), and scalar_one_or_none would
+        # raise MultipleResultsFound.
+
         # 1. same Telegram message (e.g. edited or re-processed)
         r = await session.execute(
-            base.where(Match.chat_id == chat_id, Match.message_id == message_id)
+            base.where(Match.chat_id == chat_id, Match.message_id == message_id).limit(1)
         )
-        if r.scalar_one_or_none():
+        if r.scalars().first():
             return True
 
         # 2. exact text repost in any chat
         r = await session.execute(
-            base.where(Match.message_hash == msg_hash, Match.sent_at >= cutoff)
+            base.where(Match.message_hash == msg_hash, Match.sent_at >= cutoff).limit(1)
         )
-        if r.scalar_one_or_none():
+        if r.scalars().first():
             return True
 
         # 3. same apartment, different wording
         r = await session.execute(
-            base.where(Match.listing_fingerprint == fingerprint, Match.sent_at >= cutoff)
+            base.where(Match.listing_fingerprint == fingerprint, Match.sent_at >= cutoff).limit(1)
         )
-        if r.scalar_one_or_none():
+        if r.scalars().first():
             return True
 
     return False

@@ -155,7 +155,8 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
         return
 
     message = event.message
-    text = message.text or message.caption or ""
+    # Telethon Message: .text already covers media captions; .caption doesn't exist on Telethon objects.
+    text = (getattr(message, "text", None) or getattr(message, "message", None) or "")
     if len(text.strip()) < 30:
         return
 
@@ -182,13 +183,15 @@ async def process_new_message(telegram_id: int, chat_id: int, chat_name: str, ev
             logger.debug(f"  ❌ {client.name}: {reason}")
             continue
 
+        # Dedupe BEFORE the LLM call: same listing reposted across chats must not
+        # trigger another semantic_match — that's wasted spend on a guaranteed dup.
+        if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
+            logger.info(f"  ⏭ Дубликат для {client.name}")
+            continue
+
         sem_result = await semantic_match(listing, text, client)
         if not sem_result.get("matches"):
             logger.info(f"  🚫 {client.name}: {sem_result.get('reason')}")
-            continue
-
-        if await is_duplicate_match(user.id, client.id, chat_id, message.id, text, listing):
-            logger.info(f"  ⏭ Дубликат для {client.name}")
             continue
 
         await save_match(
