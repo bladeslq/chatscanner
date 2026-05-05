@@ -53,8 +53,17 @@ _SKIP_RE = re.compile(
 )
 
 
+_NORM_STRIP_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
+
+
 def _content_key(text: str) -> str:
-    norm = re.sub(r"\s+", " ", text).strip().lower()
+    """Aggressive normalization so repost-bot variations of the same listing
+    share one cache key. Strips everything except letters/digits/whitespace
+    (kills emoji, markdown wrappers like **__~~, punctuation, unicode bullets),
+    then collapses whitespace and lowercases.
+    """
+    norm = _NORM_STRIP_RE.sub(" ", text)
+    norm = re.sub(r"\s+", " ", norm).strip().lower()
     return hashlib.md5(norm.encode("utf-8")).hexdigest()
 
 
