@@ -215,53 +215,74 @@ async def dgis_geocoder(address: str) -> str | None:
     return district
 
 
+_PROBE_HOUSES = (1, 15, 40, 80, 150)
+
+
 async def dgis_street_districts(street: str) -> tuple[list[str], bool]:
-    """Sample buildings on a street to find which district(s) it passes through.
+    """Sample buildings at fixed house numbers to find which district(s) the
+    street passes through.
+
+    2GIS catalog API returns 0 results for bare street name with type=building,
+    so we probe specific house numbers (1, 15, 40, 80, 150) and collect all
+    distinct Kazan districts seen. Filter results by full_name starting with
+    "Казань" to avoid namesake streets in suburbs.
 
     Returns (districts_sorted_by_count, low_confidence).
-    low_confidence=True if <5 buildings or all clustered within 1km — caller should
-    flag the listing as multi-district even if a single district was returned.
+    low_confidence=True if fewer than 2 sample points returned Kazan houses —
+    caller flags the listing as multi-district even if a single district was
+    returned (insufficient evidence to claim it's truly single).
     """
     if not DGIS_API_KEY or not street:
         return [], False
-    cache_key = f"street::{street.lower().strip()}"
+    # v2: cache invalidated; v1 stored mostly empty results from a broken query.
+    cache_key = f"street::v2::{street.lower().strip()}"
     if cache_key in _cache:
         c = _cache[cache_key]
         return c.get("districts", []), c.get("low_confidence", False)
 
+    seen: dict[str, int] = {}
+    kazan_count = 0
+
     async with aiohttp.ClientSession() as session:
-        data = await _dgis_get(session, "https://catalog.api.2gis.com/3.0/items", {
-            "q": street,
-            "location": f"{KAZAN_LON},{KAZAN_LAT}",
-            "radius": KAZAN_RADIUS,
-            "fields": "items.adm_div,items.full_name,items.point",
-            "type": "building",
-            "page_size": 10,  # 2GIS hard limit; >10 silently returns 0
-            "key": DGIS_API_KEY,
-        })
-        if not data:
-            return [], False
-        items = data.get("result", {}).get("items", [])
+        async def _probe(house: int) -> None:
+            nonlocal kazan_count
+            data = await _dgis_get(session, "https://catalog.api.2gis.com/3.0/items", {
+                "q": f"{street} {house}",
+                "location": f"{KAZAN_LON},{KAZAN_LAT}",
+                "radius": KAZAN_RADIUS,
+                "fields": "items.adm_div,items.full_name",
+                "type": "building",
+                "page_size": 10,
+                "key": DGIS_API_KEY,
+            })
+            if not data:
+                return
+            for it in data.get("result", {}).get("items", []):
+                full_name = it.get("full_name", "")
+                if not full_name.startswith("Казань"):
+                    continue  # skip namesake streets in suburbs
+                kazan_count += 1
+                d = _extract_district_from_admdiv(it.get("adm_div", []))
+                if d:
+                    seen[d] = seen.get(d, 0) + 1
 
-        seen: dict[str, int] = {}
-        points = []
-        for it in items:
-            d = _extract_district_from_admdiv(it.get("adm_div", []))
-            if d:
-                seen[d] = seen.get(d, 0) + 1
-            pt = it.get("point")
-            if pt:
-                points.append((pt.get("lat"), pt.get("lon")))
+        await asyncio.gather(*(_probe(h) for h in _PROBE_HOUSES))
 
-        spread_km = 0.0
-        if len(points) >= 2:
-            lat_range = max(p[0] for p in points) - min(p[0] for p in points)
-            lon_range = max(p[1] for p in points) - min(p[1] for p in points)
-            spread_km = max(lat_range * 111, lon_range * 62)
-        low_confidence = (len(items) < 5) or (spread_km < 1.0 and len(points) >= 2)
-
-        ordered = sorted(seen.items(), key=lambda x: -x[1])
-        districts = [d for d, _ in ordered]
+    ordered = sorted(seen.items(), key=lambda x: -x[1])
+    # Threshold: only keep districts that scored >= 70% of the leader's count.
+    # Filters out 2GIS data-quality false-positives — some Kazan streets have
+    # duplicate building records cross-listed in a neighboring district even
+    # though locals consider the street single-district (e.g. Меридианная on
+    # Ново-Сав/Приволж boundary, Декабристов on Кировский/Московский boundary).
+    if ordered:
+        leader_count = ordered[0][1]
+        cutoff = leader_count * 0.7
+        districts = [d for d, c in ordered if c >= cutoff]
+    else:
+        districts = []
+    # Low confidence: only one sample point or no points at all — caller will
+    # widen the listing's districts_all to multi for safety.
+    low_confidence = kazan_count < 2
 
     _cache[cache_key] = {"districts": districts, "low_confidence": low_confidence}
     await _save_cache()
